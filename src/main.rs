@@ -45,7 +45,7 @@ fn main() {
     //model.normalise_weights();
 
     let stdp = STDP::new(
-        0.01,  // a_plus
+        0.08,  // a_plus
         0.005, // a_minus
         1.0,   // tau_plus
         1.0,   // tau_minus
@@ -81,11 +81,6 @@ fn main() {
     println!("Training...");
     let mut metrics = TrainingMetrics::new(num_neurons);
 
-    // Lateral Inhibition: When one neuron spikes, it inhibits others
-    // by resetting their potential, forcing neurons to compete and specialize
-    // in different patterns.
-    let lateral_inhibition = true;
-
     let num_epochs = 5;
     for epoch in 0..num_epochs {
         metrics.reset_epoch();
@@ -101,18 +96,21 @@ fn main() {
 
                 let output_spikes = model.step(&input_spikes, dt, current_time);
 
+                let winner = model.neuron_idx_with_highest_membrane_potential();
                 let mut filtered_spikes = vec![false; num_neurons];
-                if lateral_inhibition {
-                    if let Some(winner) = output_spikes.iter().position(|&s| s) {
-                        filtered_spikes[winner] = true;
-                        for (i, neuron) in model.neurons.iter_mut().enumerate() {
-                            if i != winner {
-                                neuron.v = neuron.v_reset;
-                            }
+
+                // if winner neuron spiked
+                if output_spikes[winner] {
+                    filtered_spikes[winner] = true;
+
+                    // Lateral Inhibition: When one neuron spikes, it inhibits others
+                    // by resetting their potential, forcing neurons to compete and specialize
+                    // in different patterns.
+                    for (i, neuron) in model.neurons.iter_mut().enumerate() {
+                        if i != winner {
+                            neuron.v = neuron.v_reset;
                         }
                     }
-                } else {
-                    filtered_spikes = output_spikes;
                 }
 
                 stdp.update(
