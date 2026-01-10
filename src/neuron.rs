@@ -8,6 +8,7 @@
 /// - v_rest is the resting potential
 /// - R is the membrane resistance
 /// - I(t) is the input current at time t
+#[derive(Clone)]
 pub struct LIFNeuron {
     /// Current membrane potential (V)
     pub v: f64,
@@ -49,6 +50,17 @@ impl LIFNeuron {
         }
     }
 
+    pub fn default() -> Self {
+        Self::new(
+            -70.0, // v_rest
+            -70.0, // v_reset
+            -50.0, // v_threshold
+            0.02,  // tau_m
+            10.0,  // r
+            0.005, // refractory_period
+        )
+    }
+
     /// Updates the neuron state for a single time step.
     ///
     /// - `i_ext`: External input current (Amperes)
@@ -87,10 +99,10 @@ mod tests {
     fn test_passive_leak() {
         let mut neuron = LIFNeuron::new(-70.0, -70.0, -50.0, 0.02, 10.0, 0.005);
         neuron.v = -60.0; // Start above rest
-        
+
         // Step forward without input
         neuron.step(0.0, 0.001, 0.001);
-        
+
         // Potential should have decreased towards -70.0
         assert!(neuron.v < -60.0);
         assert!(neuron.v > -70.0);
@@ -99,10 +111,10 @@ mod tests {
     #[test]
     fn test_integration() {
         let mut neuron = LIFNeuron::new(-70.0, -70.0, -50.0, 0.02, 10.0, 0.005);
-        
+
         // Apply positive current
         neuron.step(2.0, 0.001, 0.001);
-        
+
         // Potential should have increased
         assert!(neuron.v > -70.0);
     }
@@ -110,10 +122,10 @@ mod tests {
     #[test]
     fn test_firing() {
         let mut neuron = LIFNeuron::new(-70.0, -70.0, -50.0, 0.02, 10.0, 0.005);
-        
+
         // Apply very large current to trigger immediate spike
         let fired = neuron.step(10.0, 0.1, 0.1);
-        
+
         assert!(fired);
         assert_eq!(neuron.v, -70.0); // Should be reset
         assert_eq!(neuron.last_spike_time, 0.1);
@@ -122,16 +134,16 @@ mod tests {
     #[test]
     fn test_refractory_period() {
         let mut neuron = LIFNeuron::new(-70.0, -70.0, -50.0, 0.02, 10.0, 0.005);
-        
+
         // Trigger a spike
         neuron.step(10.0, 0.1, 0.1);
-        
+
         // Try to increase potential during refractory period
-        neuron.step(10.0, 0.001, 0.102); 
-        
+        neuron.step(10.0, 0.001, 0.102);
+
         // Should still be at reset potential
         assert_eq!(neuron.v, -70.0);
-        
+
         // After refractory period
         neuron.step(10.0, 0.001, 0.106);
         assert!(neuron.v > -70.0);

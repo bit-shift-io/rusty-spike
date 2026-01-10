@@ -36,7 +36,7 @@ impl STDP {
     }
 
     /// Updates the weights of a model based on STDP.
-    /// 
+    ///
     /// - `model`: The model to update.
     /// - `output_spikes`: A slice indicating which neurons in the model spiked this step.
     /// - `input_spikes`: A slice indicating which input channels spiked this step.
@@ -81,35 +81,35 @@ impl STDP {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::Model;
+    use crate::{model::Model, neuron::LIFNeuron};
 
     #[test]
     fn test_stdp_potentiation() {
-        let mut model = Model::new(1, 1);
+        let mut model = Model::new(1, 1, LIFNeuron::default());
         let stdp = STDP::new(0.1, 0.1, 0.02, 0.02, 1.0, 0.0);
-        
+
         // Simulate a pre-synaptic spike at t=0.01
         model.last_input_spike_times[0] = 0.01;
-        
+
         // Post-synaptic spike at t=0.02
         stdp.update(&mut model, &[true], &[false], 0.02);
-        
+
         // Weight should have increased
         assert!(model.weights[0][0] > 0.0);
     }
 
     #[test]
     fn test_stdp_depression() {
-        let mut model = Model::new(1, 1);
+        let mut model = Model::new(1, 1, LIFNeuron::default());
         let stdp = STDP::new(0.1, 0.1, 0.02, 0.02, 1.0, 0.0);
         model.weights[0][0] = 0.5;
-        
+
         // Post-synaptic spike at t=0.01
         model.neurons[0].last_spike_time = 0.01;
-        
+
         // Pre-synaptic spike at t=0.02
         stdp.update(&mut model, &[false], &[true], 0.02);
-        
+
         // Weight should have decreased
         assert!(model.weights[0][0] < 0.5);
     }

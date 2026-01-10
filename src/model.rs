@@ -5,7 +5,7 @@ use crate::neuron::LIFNeuron;
 pub struct Model {
     /// The neurons in this model
     pub neurons: Vec<LIFNeuron>,
-    /// Weights from inputs to each neuron. 
+    /// Weights from inputs to each neuron.
     /// weights[i][j] is the weight from input j to neuron i.
     pub weights: Vec<Vec<f64>>,
     /// Last time each input channel spiked (seconds).
@@ -14,21 +14,10 @@ pub struct Model {
 
 impl Model {
     /// Creates a new model with a specified number of neurons and input size.
-    /// 
+    ///
     /// All neurons are initialized with the same default LIF parameters.
-    pub fn new(num_neurons: usize, num_inputs: usize) -> Self {
-        let neurons = (0..num_neurons)
-            .map(|_| {
-                LIFNeuron::new(
-                    -70.0, // v_rest
-                    -70.0, // v_reset
-                    -50.0, // v_threshold
-                    0.02,  // tau_m
-                    10.0,  // r
-                    0.005, // refractory_period
-                )
-            })
-            .collect();
+    pub fn new(num_neurons: usize, num_inputs: usize, neuron_template: LIFNeuron) -> Self {
+        let neurons = (0..num_neurons).map(|_| neuron_template.clone()).collect();
 
         // Initialize weights to 0.0
         let weights = vec![vec![0.0; num_inputs]; num_neurons];
@@ -49,11 +38,11 @@ impl Model {
     }
 
     /// Performs a single simulation step.
-    /// 
+    ///
     /// - `input_spikes`: A slice representing which input channels spiked.
     /// - `dt`: Time step (seconds).
     /// - `current_time`: Current simulation time (seconds).
-    /// 
+    ///
     /// Returns a vector of booleans indicating which neurons in the model spiked.
     pub fn step(&mut self, input_spikes: &[bool], dt: f64, current_time: f64) -> Vec<bool> {
         let mut output_spikes = Vec::with_capacity(self.neurons.len());
@@ -91,7 +80,7 @@ mod tests {
 
     #[test]
     fn test_model_initialization() {
-        let model = Model::new(5, 10);
+        let model = Model::new(5, 10, LIFNeuron::default());
         assert_eq!(model.neurons.len(), 5);
         assert_eq!(model.weights.len(), 5);
         assert_eq!(model.weights[0].len(), 10);
@@ -99,17 +88,17 @@ mod tests {
 
     #[test]
     fn test_model_step_no_input() {
-        let mut model = Model::new(1, 1);
+        let mut model = Model::new(1, 1, LIFNeuron::default());
         let spikes = model.step(&[false], 0.001, 0.001);
         assert!(!spikes[0]);
     }
 
     #[test]
     fn test_model_spike_propagation() {
-        let mut model = Model::new(1, 1);
+        let mut model = Model::new(1, 1, LIFNeuron::default());
         // Set a huge weight to ensure firing
         model.set_weight(0, 0, 100.0);
-        
+
         let spikes = model.step(&[true], 0.1, 0.1);
         assert!(spikes[0]);
     }
