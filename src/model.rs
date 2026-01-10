@@ -8,6 +8,8 @@ pub struct Model {
     /// Weights from inputs to each neuron. 
     /// weights[i][j] is the weight from input j to neuron i.
     pub weights: Vec<Vec<f64>>,
+    /// Last time each input channel spiked (seconds).
+    pub last_input_spike_times: Vec<f64>,
 }
 
 impl Model {
@@ -30,8 +32,13 @@ impl Model {
 
         // Initialize weights to 0.0
         let weights = vec![vec![0.0; num_inputs]; num_neurons];
+        let last_input_spike_times = vec![-f64::INFINITY; num_inputs];
 
-        Self { neurons, weights }
+        Self {
+            neurons,
+            weights,
+            last_input_spike_times,
+        }
     }
 
     /// Sets the weight of a specific synapse.
@@ -50,6 +57,13 @@ impl Model {
     /// Returns a vector of booleans indicating which neurons in the model spiked.
     pub fn step(&mut self, input_spikes: &[bool], dt: f64, current_time: f64) -> Vec<bool> {
         let mut output_spikes = Vec::with_capacity(self.neurons.len());
+
+        // Update input spike times
+        for (j, &spiked) in input_spikes.iter().enumerate() {
+            if spiked && j < self.last_input_spike_times.len() {
+                self.last_input_spike_times[j] = current_time;
+            }
+        }
 
         for (i, neuron) in self.neurons.iter_mut().enumerate() {
             // Calculate total input current for this neuron
