@@ -8,6 +8,7 @@ use model::Model;
 use training::STDP;
 
 use crate::neuron::LIFNeuron;
+use crate::training::TrainingMetrics;
 
 fn main() {
     println!("Rusty Spike SNN Simulation");
@@ -24,10 +25,13 @@ fn main() {
     let num_neurons = 2;
     let mut model = Model::new(num_neurons, num_inputs, LIFNeuron::default());
 
-    // Initialize weights with more variance to encourage differentiation
+    // Initialize weights with more magnitude to ensure neurons can reach threshold
+    // Threshold is -50mV, rest is -70mV, so we need >20mV increase.
+    // R=10, so we need >2.0 units of current.
+    // With 5 inputs active, each weight should be around 0.5-0.8.
     for j in 0..num_inputs {
-        model.set_weight(0, j, rand::random::<f64>() * 0.3 + 0.1);
-        model.set_weight(1, j, rand::random::<f64>() * 0.3 + 0.1);
+        model.set_weight(0, j, rand::random::<f64>() * 0.4 + 0.5);
+        model.set_weight(1, j, rand::random::<f64>() * 0.4 + 0.5);
     }
 
     let stdp = STDP::new(
@@ -56,7 +60,10 @@ fn main() {
 
     // 3. Training Loop
     println!("Training...");
+    let mut metrics = TrainingMetrics::new(num_neurons);
+
     for epoch in 0..100 {
+        metrics.reset_epoch();
         for (_label, data) in &patterns {
             let mut current_time = 0.0;
             for _step in 0..steps {
@@ -82,11 +89,12 @@ fn main() {
                 }
 
                 stdp.update(&mut model, &filtered_spikes, &input_spikes, current_time);
+                metrics.record(&filtered_spikes);
                 current_time += dt;
             }
         }
-        if (epoch + 1) % 5 == 0 {
-            println!("  Epoch {} complete", epoch + 1);
+        if (epoch + 1) % 10 == 0 {
+            metrics.report(epoch + 1, dt);
         }
     }
 

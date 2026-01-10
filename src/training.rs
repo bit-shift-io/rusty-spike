@@ -1,4 +1,57 @@
 use crate::model::Model;
+use std::collections::HashSet;
+
+pub struct TrainingMetrics {
+    pub firing_counts: Vec<usize>,
+    pub ever_fired: HashSet<usize>,
+    pub total_steps: usize,
+    pub num_neurons: usize,
+}
+
+impl TrainingMetrics {
+    pub fn new(num_neurons: usize) -> Self {
+        Self {
+            firing_counts: vec![0; num_neurons],
+            ever_fired: HashSet::new(),
+            total_steps: 0,
+            num_neurons,
+        }
+    }
+
+    pub fn record(&mut self, spikes: &[bool]) {
+        self.total_steps += 1;
+        for (i, &spiked) in spikes.iter().enumerate() {
+            if spiked {
+                self.firing_counts[i] += 1;
+                self.ever_fired.insert(i);
+            }
+        }
+    }
+
+    pub fn report(&self, epoch: usize, dt: f64) {
+        let sim_time = self.total_steps as f64 * dt;
+        let coverage = (self.ever_fired.len() as f64 / self.num_neurons as f64) * 100.0;
+        println!("  Epoch {} Metrics:", epoch);
+        println!(
+            "    Neuron Coverage: {:.1}% ({}/{})",
+            coverage,
+            self.ever_fired.len(),
+            self.num_neurons
+        );
+        for i in 0..self.num_neurons {
+            let freq = self.firing_counts[i] as f64 / sim_time;
+            println!(
+                "    Neuron {}: {} spikes ({:.2} Hz)",
+                i, self.firing_counts[i], freq
+            );
+        }
+    }
+
+    pub fn reset_epoch(&mut self) {
+        self.firing_counts.fill(0);
+        self.total_steps = 0;
+    }
+}
 
 /// Spike-timing-dependent plasticity (STDP) parameters.
 pub struct STDP {
@@ -112,5 +165,23 @@ mod tests {
 
         // Weight should have decreased
         assert!(model.weights[0][0] < 0.5);
+    }
+
+    #[test]
+    fn test_training_metrics() {
+        let mut metrics = TrainingMetrics::new(2);
+        metrics.record(&[true, false]);
+        metrics.record(&[false, false]);
+        metrics.record(&[true, true]);
+
+        assert_eq!(metrics.firing_counts[0], 2);
+        assert_eq!(metrics.firing_counts[1], 1);
+        assert_eq!(metrics.ever_fired.len(), 2);
+        assert_eq!(metrics.total_steps, 3);
+
+        metrics.reset_epoch();
+        assert_eq!(metrics.firing_counts[0], 0);
+        assert_eq!(metrics.total_steps, 0);
+        assert_eq!(metrics.ever_fired.len(), 2); // Coverage persists
     }
 }
