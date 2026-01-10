@@ -62,7 +62,12 @@ fn main() {
     println!("Training...");
     let mut metrics = TrainingMetrics::new(num_neurons);
 
-    let num_epochs = 10;
+    // Lateral Inhibition: When one neuron spikes, it inhibits others
+    // by resetting their potential, forcing neurons to compete and specialize
+    // in different patterns.
+    let lateral_inhibition = false;
+
+    let num_epochs = 5;
     for epoch in 0..num_epochs {
         metrics.reset_epoch();
         for (_label, data) in &patterns {
@@ -77,27 +82,28 @@ fn main() {
 
                 let output_spikes = model.step(&input_spikes, dt, current_time);
 
-                // Lateral Inhibition: When one neuron spikes, it inhibits others
-                // by resetting their potential, forcing neurons to compete and specialize
-                // in different patterns.
-                // let mut filtered_spikes = vec![false; num_neurons];
-                // if let Some(winner) = output_spikes.iter().position(|&s| s) {
-                //     filtered_spikes[winner] = true;
-                //     for (i, neuron) in model.neurons.iter_mut().enumerate() {
-                //         if i != winner {
-                //             neuron.v = neuron.v_reset;
-                //         }
-                //     }
-                // }
+                let mut filtered_spikes = vec![false; num_neurons];
+                if lateral_inhibition {
+                    if let Some(winner) = output_spikes.iter().position(|&s| s) {
+                        filtered_spikes[winner] = true;
+                        for (i, neuron) in model.neurons.iter_mut().enumerate() {
+                            if i != winner {
+                                neuron.v = neuron.v_reset;
+                            }
+                        }
+                    }
+                } else {
+                    filtered_spikes = output_spikes;
+                }
 
                 stdp.update(
                     &mut model,
-                    &output_spikes, //&filtered_spikes, //&output_spikes,
+                    &filtered_spikes,
                     &input_spikes,
                     current_time,
                     &mut metrics,
                 );
-                metrics.record(&output_spikes);
+                metrics.record(&filtered_spikes);
                 current_time += dt;
             }
         }
@@ -121,9 +127,11 @@ fn main() {
             let output_spikes = model.step(&input_spikes, dt, current_time);
             if let Some(winner) = output_spikes.iter().position(|&s| s) {
                 neuron_selectivity[winner][*label] += 1;
-                for (i, neuron) in model.neurons.iter_mut().enumerate() {
-                    if i != winner {
-                        neuron.v = neuron.v_reset;
+                if lateral_inhibition {
+                    for (i, neuron) in model.neurons.iter_mut().enumerate() {
+                        if i != winner {
+                            neuron.v = neuron.v_reset;
+                        }
                     }
                 }
             }
@@ -161,9 +169,11 @@ fn main() {
             let output_spikes = model.step(&input_spikes, dt, current_time);
             if let Some(winner) = output_spikes.iter().position(|&s| s) {
                 spike_counts[winner] += 1;
-                for (i, neuron) in model.neurons.iter_mut().enumerate() {
-                    if i != winner {
-                        neuron.v = neuron.v_reset;
+                if lateral_inhibition {
+                    for (i, neuron) in model.neurons.iter_mut().enumerate() {
+                        if i != winner {
+                            neuron.v = neuron.v_reset;
+                        }
                     }
                 }
             }
