@@ -89,6 +89,11 @@ impl LIFNeuron {
             false
         }
     }
+
+    pub fn reset(&mut self) {
+        self.v = self.v_rest;
+        self.last_spike_time = -f64::INFINITY;
+    }
 }
 
 #[cfg(test)]

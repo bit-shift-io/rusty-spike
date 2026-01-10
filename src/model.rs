@@ -72,6 +72,12 @@ impl Model {
 
         output_spikes
     }
+
+    pub fn reset(&mut self) {
+        for neuron in &mut self.neurons {
+            neuron.reset();
+        }
+    }
 }
 
 #[cfg(test)]

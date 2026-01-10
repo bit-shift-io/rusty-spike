@@ -59,8 +59,9 @@ impl STDP {
                         let dt = current_time - t_pre;
                         let dw = self.a_plus * (-dt / self.tau_plus).exp();
                         let old_weight = model.weights[i][j];
-                        model.weights[i][j] = (old_weight + dw).min(self.w_max);
-                        let actual_dw = model.weights[i][j] - old_weight;
+                        let new_weight = (old_weight + dw).min(self.w_max);
+                        model.weights[i][j] = new_weight;
+                        let actual_dw = new_weight - old_weight;
                         metrics.record_weight_change(actual_dw);
                     }
                 }
@@ -76,8 +77,9 @@ impl STDP {
                         let dt = current_time - t_post;
                         let dw = self.a_minus * (-dt / self.tau_minus).exp();
                         let old_weight = model.weights[i][j];
-                        model.weights[i][j] = (old_weight - dw).max(self.w_min);
-                        let actual_dw = model.weights[i][j] - old_weight;
+                        let new_weight = (old_weight - dw).max(self.w_min);
+                        model.weights[i][j] = new_weight;
+                        let actual_dw = new_weight - old_weight;
                         metrics.record_weight_change(actual_dw);
                     }
                 }

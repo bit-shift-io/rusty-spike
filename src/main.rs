@@ -35,12 +35,12 @@ fn main() {
     }
 
     let stdp = STDP::new(
-        0.15, // a_plus
-        0.20, // a_minus
-        0.04, // tau_plus
-        0.04, // tau_minus
-        2.0,  // w_max
-        0.0,  // w_min
+        0.01,  // a_plus
+        0.005, // a_minus
+        1.0,   // tau_plus
+        1.0,   // tau_minus
+        2.0,   // w_max
+        0.0,   // w_min
     );
 
     // 2. Generate Simple Data (Two Patterns)
@@ -62,10 +62,11 @@ fn main() {
     println!("Training...");
     let mut metrics = TrainingMetrics::new(num_neurons);
 
-    let num_epochs = 5;
+    let num_epochs = 10;
     for epoch in 0..num_epochs {
         metrics.reset_epoch();
         for (_label, data) in &patterns {
+            model.reset();
             let mut current_time = 0.0;
             for _step in 0..steps {
                 let input_spikes: Vec<bool> = data
@@ -79,19 +80,19 @@ fn main() {
                 // Lateral Inhibition: When one neuron spikes, it inhibits others
                 // by resetting their potential, forcing neurons to compete and specialize
                 // in different patterns.
-                let mut filtered_spikes = vec![false; num_neurons];
-                if let Some(winner) = output_spikes.iter().position(|&s| s) {
-                    filtered_spikes[winner] = true;
-                    for (i, neuron) in model.neurons.iter_mut().enumerate() {
-                        if i != winner {
-                            neuron.v = neuron.v_reset;
-                        }
-                    }
-                }
+                // let mut filtered_spikes = vec![false; num_neurons];
+                // if let Some(winner) = output_spikes.iter().position(|&s| s) {
+                //     filtered_spikes[winner] = true;
+                //     for (i, neuron) in model.neurons.iter_mut().enumerate() {
+                //         if i != winner {
+                //             neuron.v = neuron.v_reset;
+                //         }
+                //     }
+                // }
 
                 stdp.update(
                     &mut model,
-                    &filtered_spikes,
+                    &output_spikes, //&filtered_spikes, //&output_spikes,
                     &input_spikes,
                     current_time,
                     &mut metrics,
@@ -109,6 +110,7 @@ fn main() {
     println!("Calibrating labels...");
     let mut neuron_selectivity = vec![vec![0; patterns.len()]; num_neurons];
     for (label, data) in &patterns {
+        model.reset();
         let mut current_time = 0.0;
         for _step in 0..steps {
             let input_spikes: Vec<bool> = data
@@ -147,6 +149,7 @@ fn main() {
 
         let mut spike_counts = vec![0; num_neurons];
         let mut current_time = 0.0;
+        model.reset();
 
         for _step in 0..steps {
             let input_spikes: Vec<bool> = data
