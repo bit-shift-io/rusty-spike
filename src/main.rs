@@ -2,13 +2,13 @@ mod encoding;
 mod model;
 mod neuron;
 mod training;
+mod training_metrics;
 
 use encoding::{Encoder, RateEncoder};
 use model::Model;
 use training::STDP;
 
-use crate::neuron::LIFNeuron;
-use crate::training::TrainingMetrics;
+use crate::{neuron::LIFNeuron, training_metrics::TrainingMetrics};
 
 fn main() {
     println!("Rusty Spike SNN Simulation");
@@ -55,14 +55,15 @@ fn main() {
     let sim_time = 0.3; // 300ms per pattern
     let steps = (sim_time / dt) as usize;
     let mut encoders = (0..num_inputs)
-        .map(|_| RateEncoder::new(50.0))
+        .map(|_| RateEncoder::new(150.0))
         .collect::<Vec<_>>();
 
     // 3. Training Loop
     println!("Training...");
     let mut metrics = TrainingMetrics::new(num_neurons);
 
-    for epoch in 0..100 {
+    let num_epochs = 5;
+    for epoch in 0..num_epochs {
         metrics.reset_epoch();
         for (_label, data) in &patterns {
             let mut current_time = 0.0;
@@ -88,14 +89,20 @@ fn main() {
                     }
                 }
 
-                stdp.update(&mut model, &filtered_spikes, &input_spikes, current_time);
-                metrics.record(&filtered_spikes);
+                stdp.update(
+                    &mut model,
+                    &filtered_spikes,
+                    &input_spikes,
+                    current_time,
+                    &mut metrics,
+                );
+                metrics.record(&output_spikes);
                 current_time += dt;
             }
         }
-        if (epoch + 1) % 10 == 0 {
-            metrics.report(epoch + 1, dt);
-        }
+        //if (epoch + 1) % 10 == 0 {
+        metrics.report(epoch + 1, dt);
+        // }
     }
 
     // 4. Calibration: Map neurons to labels

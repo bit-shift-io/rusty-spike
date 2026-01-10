@@ -1,57 +1,5 @@
 use crate::model::Model;
-use std::collections::HashSet;
-
-pub struct TrainingMetrics {
-    pub firing_counts: Vec<usize>,
-    pub ever_fired: HashSet<usize>,
-    pub total_steps: usize,
-    pub num_neurons: usize,
-}
-
-impl TrainingMetrics {
-    pub fn new(num_neurons: usize) -> Self {
-        Self {
-            firing_counts: vec![0; num_neurons],
-            ever_fired: HashSet::new(),
-            total_steps: 0,
-            num_neurons,
-        }
-    }
-
-    pub fn record(&mut self, spikes: &[bool]) {
-        self.total_steps += 1;
-        for (i, &spiked) in spikes.iter().enumerate() {
-            if spiked {
-                self.firing_counts[i] += 1;
-                self.ever_fired.insert(i);
-            }
-        }
-    }
-
-    pub fn report(&self, epoch: usize, dt: f64) {
-        let sim_time = self.total_steps as f64 * dt;
-        let coverage = (self.ever_fired.len() as f64 / self.num_neurons as f64) * 100.0;
-        println!("  Epoch {} Metrics:", epoch);
-        println!(
-            "    Neuron Coverage: {:.1}% ({}/{})",
-            coverage,
-            self.ever_fired.len(),
-            self.num_neurons
-        );
-        for i in 0..self.num_neurons {
-            let freq = self.firing_counts[i] as f64 / sim_time;
-            println!(
-                "    Neuron {}: {} spikes ({:.2} Hz)",
-                i, self.firing_counts[i], freq
-            );
-        }
-    }
-
-    pub fn reset_epoch(&mut self) {
-        self.firing_counts.fill(0);
-        self.total_steps = 0;
-    }
-}
+use crate::training_metrics::TrainingMetrics;
 
 /// Spike-timing-dependent plasticity (STDP) parameters.
 pub struct STDP {
@@ -100,6 +48,7 @@ impl STDP {
         output_spikes: &[bool],
         input_spikes: &[bool],
         current_time: f64,
+        metrics: &mut TrainingMetrics,
     ) {
         // 1. Post-synaptic spike: Potentiate weights from inputs that spiked recently
         for (i, &post_spiked) in output_spikes.iter().enumerate() {
@@ -109,7 +58,10 @@ impl STDP {
                     if t_pre <= current_time && t_pre > -f64::INFINITY {
                         let dt = current_time - t_pre;
                         let dw = self.a_plus * (-dt / self.tau_plus).exp();
-                        model.weights[i][j] = (model.weights[i][j] + dw).min(self.w_max);
+                        let old_weight = model.weights[i][j];
+                        model.weights[i][j] = (old_weight + dw).min(self.w_max);
+                        let actual_dw = model.weights[i][j] - old_weight;
+                        metrics.record_weight_change(actual_dw);
                     }
                 }
             }
@@ -123,7 +75,10 @@ impl STDP {
                     if t_post <= current_time && t_post > -f64::INFINITY {
                         let dt = current_time - t_post;
                         let dw = self.a_minus * (-dt / self.tau_minus).exp();
-                        model.weights[i][j] = (model.weights[i][j] - dw).max(self.w_min);
+                        let old_weight = model.weights[i][j];
+                        model.weights[i][j] = (old_weight - dw).max(self.w_min);
+                        let actual_dw = model.weights[i][j] - old_weight;
+                        metrics.record_weight_change(actual_dw);
                     }
                 }
             }
@@ -140,12 +95,13 @@ mod tests {
     fn test_stdp_potentiation() {
         let mut model = Model::new(1, 1, LIFNeuron::default());
         let stdp = STDP::new(0.1, 0.1, 0.02, 0.02, 1.0, 0.0);
+        let mut metrics = TrainingMetrics::new(1);
 
         // Simulate a pre-synaptic spike at t=0.01
         model.last_input_spike_times[0] = 0.01;
 
         // Post-synaptic spike at t=0.02
-        stdp.update(&mut model, &[true], &[false], 0.02);
+        stdp.update(&mut model, &[true], &[false], 0.02, &mut metrics);
 
         // Weight should have increased
         assert!(model.weights[0][0] > 0.0);
@@ -155,13 +111,14 @@ mod tests {
     fn test_stdp_depression() {
         let mut model = Model::new(1, 1, LIFNeuron::default());
         let stdp = STDP::new(0.1, 0.1, 0.02, 0.02, 1.0, 0.0);
+        let mut metrics = TrainingMetrics::new(1);
         model.weights[0][0] = 0.5;
 
         // Post-synaptic spike at t=0.01
         model.neurons[0].last_spike_time = 0.01;
 
         // Pre-synaptic spike at t=0.02
-        stdp.update(&mut model, &[false], &[true], 0.02);
+        stdp.update(&mut model, &[false], &[true], 0.02, &mut metrics);
 
         // Weight should have decreased
         assert!(model.weights[0][0] < 0.5);

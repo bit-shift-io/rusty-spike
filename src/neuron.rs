@@ -56,7 +56,7 @@ impl LIFNeuron {
             -70.0, // v_reset
             -50.0, // v_threshold
             0.02,  // tau_m
-            10.0,  // r
+            100.0, // r
             0.005, // refractory_period
         )
     }
