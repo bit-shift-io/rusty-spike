@@ -1,5 +1,7 @@
 mod neuron;
+mod encoding;
+mod model;
 
 fn main() {
-    println!("Hello, world!");
+    println!("Rusty Spike SNN Simulation");
 }
