@@ -23,16 +23,26 @@ fn main() {
     // 1. Setup Model and Training Params
     let num_inputs = 10;
     let num_neurons = 2;
-    let mut model = Model::new(num_neurons, num_inputs, LIFNeuron::default());
+    let neuron_template = LIFNeuron::default();
+    // LIFNeuron::new(
+    //     -2.0,  // v_rest
+    //     -2.0,  // v_reset
+    //     -1.0,  // v_threshold
+    //     0.02,  // tau_m
+    //     100.0, // r
+    //     0.005, // refractory_period
+    // );
+    let mut model = Model::new(num_neurons, num_inputs, neuron_template);
 
     // Initialize weights with more magnitude to ensure neurons can reach threshold
     // Threshold is -50mV, rest is -70mV, so we need >20mV increase.
     // R=10, so we need >2.0 units of current.
     // With 5 inputs active, each weight should be around 0.5-0.8.
     for j in 0..num_inputs {
-        model.set_weight(0, j, rand::random::<f64>() * 0.4 + 0.5);
-        model.set_weight(1, j, rand::random::<f64>() * 0.4 + 0.5);
+        model.set_weight(0, j, rand::random::<f64>() + 0.01); // * 0.4 + 0.5);
+        model.set_weight(1, j, rand::random::<f64>() + 0.01); // * 0.4 + 0.5);
     }
+    //model.normalise_weights();
 
     let stdp = STDP::new(
         0.01,  // a_plus
@@ -46,10 +56,19 @@ fn main() {
     // 2. Generate Simple Data (Two Patterns)
     // Pattern A: Inputs 0-4 are active
     // Pattern B: Inputs 5-9 are active
-    let patterns = vec![
+    let mut patterns = vec![
         (0, vec![1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
         (1, vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
     ];
+    // normalise patterns weights
+    // for pattern in patterns.iter_mut() {
+    //     let sum: f64 = pattern.1.iter().sum();
+    //     if sum > 0.0 {
+    //         for weight in pattern.1.iter_mut() {
+    //             *weight /= sum;
+    //         }
+    //     }
+    // }
 
     let dt = 0.001; // 1ms
     let sim_time = 0.3; // 300ms per pattern
@@ -65,7 +84,7 @@ fn main() {
     // Lateral Inhibition: When one neuron spikes, it inhibits others
     // by resetting their potential, forcing neurons to compete and specialize
     // in different patterns.
-    let lateral_inhibition = false;
+    let lateral_inhibition = true;
 
     let num_epochs = 5;
     for epoch in 0..num_epochs {
@@ -125,18 +144,23 @@ fn main() {
                 .map(|(i, &val)| encoders[i].step(val, dt, current_time))
                 .collect();
             let output_spikes = model.step(&input_spikes, dt, current_time);
-            if let Some(winner) = output_spikes.iter().position(|&s| s) {
-                neuron_selectivity[winner][*label] += 1;
-                if lateral_inhibition {
-                    for (i, neuron) in model.neurons.iter_mut().enumerate() {
-                        if i != winner {
-                            neuron.v = neuron.v_reset;
-                        }
-                    }
-                }
-            }
+
+            //neuron_selectivity[winner][*label] += 1;
+            // if let Some(winner) = output_spikes.iter().position(|&s| s) {
+            //     neuron_selectivity[winner][*label] += 1;
+            //     if lateral_inhibition {
+            //         for (i, neuron) in model.neurons.iter_mut().enumerate() {
+            //             if i != winner {
+            //                 neuron.v = neuron.v_reset;
+            //             }
+            //         }
+            //     }
+            // }
             current_time += dt;
         }
+
+        let winner = model.neuron_idx_with_highest_membrane_potential();
+        neuron_selectivity[winner][*label] = winner;
     }
 
     let neuron_to_label: Vec<usize> = neuron_selectivity
@@ -167,25 +191,28 @@ fn main() {
                 .collect();
 
             let output_spikes = model.step(&input_spikes, dt, current_time);
-            if let Some(winner) = output_spikes.iter().position(|&s| s) {
-                spike_counts[winner] += 1;
-                if lateral_inhibition {
-                    for (i, neuron) in model.neurons.iter_mut().enumerate() {
-                        if i != winner {
-                            neuron.v = neuron.v_reset;
-                        }
-                    }
-                }
-            }
+
+            // if let Some(winner) = output_spikes.iter().position(|&s| s) {
+            //     spike_counts[winner] += 1;
+            //     if lateral_inhibition {
+            //         for (i, neuron) in model.neurons.iter_mut().enumerate() {
+            //             if i != winner {
+            //                 neuron.v = neuron.v_reset;
+            //             }
+            //         }
+            //     }
+            // }
             current_time += dt;
         }
 
+        let prediction_neuron = model.neuron_idx_with_highest_membrane_potential();
+
         // Prediction: find which tuned neuron fired most
-        let prediction_neuron = if spike_counts[0] > spike_counts[1] {
-            0
-        } else {
-            1
-        };
+        // let prediction_neuron = if spike_counts[0] > spike_counts[1] {
+        //     0
+        // } else {
+        //     1
+        // };
         let prediction = neuron_to_label[prediction_neuron];
 
         if prediction == *label {

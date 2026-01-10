@@ -37,6 +37,17 @@ impl Model {
         }
     }
 
+    pub fn normalise_weights(&mut self) {
+        for neuron_weights in &mut self.weights {
+            let sum: f64 = neuron_weights.iter().sum();
+            if sum > 0.0 {
+                for weight in neuron_weights.iter_mut() {
+                    *weight /= sum;
+                }
+            }
+        }
+    }
+
     /// Performs a single simulation step.
     ///
     /// - `input_spikes`: A slice representing which input channels spiked.
@@ -77,6 +88,15 @@ impl Model {
         for neuron in &mut self.neurons {
             neuron.reset();
         }
+    }
+
+    pub fn neuron_idx_with_highest_membrane_potential(&self) -> usize {
+        self.neurons
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.v.partial_cmp(&b.v).unwrap())
+            .map(|(idx, _)| idx)
+            .unwrap()
     }
 }
 
