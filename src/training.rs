@@ -42,6 +42,12 @@ impl STDP {
     /// - `output_spikes`: A slice indicating which neurons in the model spiked this step.
     /// - `input_spikes`: A slice indicating which input channels spiked this step.
     /// - `current_time`: Current simulation time.
+    ///
+    /// Soft-Bound STDP
+    /// Replaced linear STDP updates with a soft-bound rule. Weight changes now scale
+    /// with the distance to the boundary (w_max - w for potentiation, w - w_min for depression).
+    /// This ensures stable weight convergence without needing aggressive global normalization.
+    ///
     pub fn update(
         &self,
         model: &mut Model,
@@ -57,7 +63,10 @@ impl STDP {
                     let t_pre = model.last_input_spike_times[j];
                     if t_pre <= current_time && t_pre > -f64::INFINITY {
                         let dt = current_time - t_pre;
-                        let dw = self.a_plus * (-dt / self.tau_plus).exp();
+                        // Soft-bound potentiation: dw = a_plus * exp(-dt/tau) * (w_max - w)
+                        let dw = self.a_plus
+                            * (-dt / self.tau_plus).exp()
+                            * (self.w_max - model.weights[i][j]);
                         let old_weight = model.weights[i][j];
                         let new_weight = (old_weight + dw).min(self.w_max);
                         model.weights[i][j] = new_weight;
@@ -75,7 +84,10 @@ impl STDP {
                     let t_post = model.neurons[i].last_spike_time;
                     if t_post <= current_time && t_post > -f64::INFINITY {
                         let dt = current_time - t_post;
-                        let dw = self.a_minus * (-dt / self.tau_minus).exp();
+                        // Soft-bound depression: dw = a_minus * exp(-dt/tau) * (w - w_min)
+                        let dw = self.a_minus
+                            * (-dt / self.tau_minus).exp()
+                            * (model.weights[i][j] - self.w_min);
                         let old_weight = model.weights[i][j];
                         let new_weight = (old_weight - dw).max(self.w_min);
                         model.weights[i][j] = new_weight;

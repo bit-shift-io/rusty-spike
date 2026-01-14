@@ -37,17 +37,17 @@ impl Model {
         }
     }
 
-    pub fn normalise_weights(&mut self, target_sum: f64) {
-        for neuron_weights in &mut self.weights {
-            let sum: f64 = neuron_weights.iter().sum();
-            if sum > 0.0 {
-                let factor = target_sum / sum;
-                for weight in neuron_weights.iter_mut() {
-                    *weight *= factor;
-                }
-            }
-        }
-    }
+    // pub fn normalise_weights(&mut self, target_sum: f64) {
+    //     for neuron_weights in &mut self.weights {
+    //         let sum: f64 = neuron_weights.iter().sum();
+    //         if sum > 0.0 {
+    //             let factor = target_sum / sum;
+    //             for weight in neuron_weights.iter_mut() {
+    //                 *weight *= factor;
+    //             }
+    //         }
+    //     }
+    // }
 
     /// Performs a single simulation step.
     ///
