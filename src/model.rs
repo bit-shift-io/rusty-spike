@@ -37,17 +37,17 @@ impl Model {
         }
     }
 
-    // pub fn normalise_weights(&mut self, target_sum: f64) {
-    //     for neuron_weights in &mut self.weights {
-    //         let sum: f64 = neuron_weights.iter().sum();
-    //         if sum > 0.0 {
-    //             let factor = target_sum / sum;
-    //             for weight in neuron_weights.iter_mut() {
-    //                 *weight *= factor;
-    //             }
-    //         }
-    //     }
-    // }
+    pub fn normalise_weights(&mut self, target_sum: f64) {
+        for neuron_weights in &mut self.weights {
+            let sum: f64 = neuron_weights.iter().sum();
+            if sum > 0.0 {
+                let factor = target_sum / sum;
+                for weight in neuron_weights.iter_mut() {
+                    *weight = (*weight * factor).min(1.0).max(0.0);
+                }
+            }
+        }
+    }
 
     /// Performs a single simulation step.
     ///
@@ -91,14 +91,14 @@ impl Model {
         }
     }
 
-    pub fn neuron_idx_with_highest_membrane_potential(&self) -> usize {
-        self.neurons
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| a.v.partial_cmp(&b.v).unwrap())
-            .map(|(idx, _)| idx)
-            .unwrap()
-    }
+    // pub fn neuron_idx_with_highest_membrane_potential(&self) -> usize {
+    //     self.neurons
+    //         .iter()
+    //         .enumerate()
+    //         .max_by(|(_, a), (_, b)| a.v.partial_cmp(&b.v).unwrap())
+    //         .map(|(idx, _)| idx)
+    //         .unwrap()
+    // }
 
     pub fn print_weights(&self) {
         // Print weights for inspection

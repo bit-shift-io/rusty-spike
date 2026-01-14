@@ -102,15 +102,10 @@ fn main() {
                 {
                     filtered_spikes[winner] = true;
 
-                    // Hyperpolarize losers (mild inhibition)
-                    // To hyperpolarize means to make the electrical potential across
-                    // a cell membrane more negative than its resting state, essentially
-                    // making the inside of the cell more negative, which makes it harder
-                    // to trigger a nerve impulse (action potential) and can occur after
-                    // an action potential or in response to certain stimuli
+                    // Stronger inhibition: Reset membrane potential of losers
                     for (i, neuron) in model.neurons.iter_mut().enumerate() {
                         if i != winner {
-                            neuron.v = -75.0; // Mild inhibition to allow competition
+                            neuron.v = neuron.v_reset;
                         }
                     }
                 }
@@ -122,6 +117,8 @@ fn main() {
                     current_time,
                     &mut metrics,
                 );
+                // Enforce weight normalization to maintain competition
+                model.normalise_weights(1.5);
                 metrics.record(&filtered_spikes);
                 current_time += dt;
             }
@@ -144,31 +141,64 @@ fn main() {
                 .enumerate()
                 .map(|(i, &val)| encoders[i].step(val, dt, current_time))
                 .collect();
+
+            let potentials_before = model.neurons.iter().map(|n| n.v).collect::<Vec<_>>();
             let output_spikes = model.step(&input_spikes, dt, current_time);
 
-            for (i, &s) in output_spikes.iter().enumerate() {
-                if s {
-                    spike_counts[i] += 1;
+            // WTA during calibration as well
+            if let Some(winner) = output_spikes
+                .iter()
+                .enumerate()
+                .filter(|&(_, &spiked)| spiked)
+                .max_by(|(i, _), (j, _)| {
+                    potentials_before[*i]
+                        .partial_cmp(&potentials_before[*j])
+                        .unwrap()
+                })
+                .map(|(i, _)| i)
+            {
+                spike_counts[winner] += 1;
+                for (i, neuron) in model.neurons.iter_mut().enumerate() {
+                    if i != winner {
+                        neuron.v = neuron.v_reset;
+                    }
                 }
             }
+
             current_time += dt;
         }
 
-        // The neuron that fired most for this label wins the "preference"
-        if let Some(winner) = spike_counts
-            .iter()
-            .enumerate()
-            .max_by_key(|&(_, count)| count)
-            .map(|(i, _)| i)
-        {
-            neuron_selectivity[winner][*label] += 1;
+        // Record which neuron "won" most for this label
+        for i in 0..num_neurons {
+            neuron_selectivity[i][*label] += spike_counts[i];
         }
     }
 
-    let neuron_to_label: Vec<usize> = neuron_selectivity
-        .iter()
-        .map(|counts| if counts[0] >= counts[1] { 0 } else { 1 })
-        .collect();
+    let neuron_to_label = if num_neurons == 2 {
+        // For 2 neurons, ensure they pick different labels if they both have preferences
+        let n0_pref0 = neuron_selectivity[0][0];
+        let n0_pref1 = neuron_selectivity[0][1];
+        let n1_pref0 = neuron_selectivity[1][0];
+        let n1_pref1 = neuron_selectivity[1][1];
+
+        if n0_pref0 >= n0_pref1 && n1_pref1 >= n1_pref0 {
+            vec![0, 1]
+        } else if n0_pref1 > n0_pref0 && n1_pref0 > n1_pref1 {
+            vec![1, 0]
+        } else {
+            // Collision! Pick labels based on strongest response
+            if n0_pref0 + n1_pref1 >= n0_pref1 + n1_pref0 {
+                vec![0, 1]
+            } else {
+                vec![1, 0]
+            }
+        }
+    } else {
+        neuron_selectivity
+            .iter()
+            .map(|counts| if counts[0] >= counts[1] { 0 } else { 1 })
+            .collect::<Vec<_>>()
+    };
 
     println!("  Neuron labels: {:?}", neuron_to_label);
 
