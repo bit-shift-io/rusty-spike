@@ -73,7 +73,7 @@ fn main() {
     println!("Training...");
     let mut metrics = TrainingMetrics::new(num_neurons);
 
-    let num_epochs = 100;
+    let num_epochs = 10;
     for epoch in 0..num_epochs {
         metrics.reset_epoch();
         for (_label, data) in &patterns {

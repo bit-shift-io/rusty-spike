@@ -24,7 +24,7 @@ impl Encoder for RateEncoder {
         // Probability of spike in time dt = rate * dt
         let rate = self.gain * input;
         let p = rate * dt;
-        
+
         // Simple random sampling
         rand::random::<f64>() < p
     }
@@ -32,6 +32,7 @@ impl Encoder for RateEncoder {
 
 /// Latency Coding: Input intensity determines the timing of the first spike.
 /// Higher input results in an earlier spike.
+#[allow(dead_code)]
 pub struct LatencyEncoder {
     /// Time constant for the latency decay
     pub tau: f64,
@@ -42,6 +43,7 @@ pub struct LatencyEncoder {
 }
 
 impl LatencyEncoder {
+    #[allow(dead_code)]
     pub fn new(tau: f64, threshold: f64) -> Self {
         Self {
             tau,
@@ -51,6 +53,7 @@ impl LatencyEncoder {
     }
 
     /// Resets the encoder for a new encoding cycle (e.g., new stimulus).
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.spiked = false;
     }
@@ -67,7 +70,7 @@ impl Encoder for LatencyEncoder {
         // Or integrate until a target time is reached.
         // Let's use a simple heuristic based on current_time vs calculated latency.
         let latency = self.tau / input;
-        
+
         if current_time >= latency {
             self.spiked = true;
             true
@@ -79,6 +82,7 @@ impl Encoder for LatencyEncoder {
 
 /// Delta Modulation: Emits a spike when the change in input exceeds a threshold.
 /// This captures the derivative of the signal.
+#[allow(dead_code)]
 pub struct DeltaEncoder {
     /// Threshold for the change in signal
     pub threshold: f64,
@@ -87,6 +91,7 @@ pub struct DeltaEncoder {
 }
 
 impl DeltaEncoder {
+    #[allow(dead_code)]
     pub fn new(threshold: f64) -> Self {
         Self {
             threshold,
@@ -114,13 +119,13 @@ mod tests {
     #[test]
     fn test_delta_encoder() {
         let mut encoder = DeltaEncoder::new(0.5);
-        
+
         // Small change, no spike
         assert!(!encoder.step(0.1, 0.001, 0.001));
-        
+
         // Large change, spike
         assert!(encoder.step(0.7, 0.001, 0.002));
-        
+
         // Small change relative to new baseline, no spike
         assert!(!encoder.step(0.8, 0.001, 0.003));
     }
@@ -128,11 +133,11 @@ mod tests {
     #[test]
     fn test_latency_encoder() {
         let mut encoder = LatencyEncoder::new(1.0, 0.1);
-        
+
         // Input is 1.0, latency = 1.0 / 1.0 = 1.0
         assert!(!encoder.step(1.0, 0.1, 0.5));
         assert!(encoder.step(1.0, 0.1, 1.1));
-        
+
         // Should only spike once
         assert!(!encoder.step(1.0, 0.1, 1.2));
     }

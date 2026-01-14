@@ -50,6 +50,7 @@ impl LIFNeuron {
         }
     }
 
+    #[allow(dead_code)]
     pub fn default() -> Self {
         Self::new(
             -70.0, // v_rest
