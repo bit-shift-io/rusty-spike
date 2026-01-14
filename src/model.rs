@@ -37,12 +37,13 @@ impl Model {
         }
     }
 
-    pub fn normalise_weights(&mut self) {
+    pub fn normalise_weights(&mut self, target_sum: f64) {
         for neuron_weights in &mut self.weights {
             let sum: f64 = neuron_weights.iter().sum();
             if sum > 0.0 {
+                let factor = target_sum / sum;
                 for weight in neuron_weights.iter_mut() {
-                    *weight /= sum;
+                    *weight *= factor;
                 }
             }
         }
@@ -97,6 +98,18 @@ impl Model {
             .max_by(|(_, a), (_, b)| a.v.partial_cmp(&b.v).unwrap())
             .map(|(idx, _)| idx)
             .unwrap()
+    }
+
+    pub fn print_weights(&self) {
+        // Print weights for inspection
+        println!("Weights:");
+        for i in 0..self.neurons.len() {
+            print!("  Neuron {}: ", i);
+            for j in 0..self.weights[i].len() {
+                print!("{:.2} ", self.weights[i][j]);
+            }
+            println!();
+        }
     }
 }
 

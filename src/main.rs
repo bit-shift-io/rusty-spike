@@ -23,15 +23,14 @@ fn main() {
     // 1. Setup Model and Training Params
     let num_inputs = 10;
     let num_neurons = 2;
-    let neuron_template = LIFNeuron::default();
-    // LIFNeuron::new(
-    //     -2.0,  // v_rest
-    //     -2.0,  // v_reset
-    //     -1.0,  // v_threshold
-    //     0.02,  // tau_m
-    //     100.0, // r
-    //     0.005, // refractory_period
-    // );
+    let neuron_template = LIFNeuron::new(
+        -70.0, // v_rest
+        -70.0, // v_reset
+        -50.0, // v_threshold
+        0.02,  // tau_m
+        200.0, // r
+        0.005, // refractory_period
+    );
     let mut model = Model::new(num_neurons, num_inputs, neuron_template);
 
     // Initialize weights with more magnitude to ensure neurons can reach threshold
@@ -39,36 +38,29 @@ fn main() {
     // R=10, so we need >2.0 units of current.
     // With 5 inputs active, each weight should be around 0.5-0.8.
     for j in 0..num_inputs {
-        model.set_weight(0, j, rand::random::<f64>() + 0.01); // * 0.4 + 0.5);
-        model.set_weight(1, j, rand::random::<f64>() + 0.01); // * 0.4 + 0.5);
+        model.set_weight(0, j, rand::random::<f64>() + 1.0);
+        model.set_weight(1, j, rand::random::<f64>() + 1.0);
     }
-    //model.normalise_weights();
+    model.normalise_weights(1.0);
+    model.print_weights();
 
     let stdp = STDP::new(
-        0.08,  // a_plus
-        0.005, // a_minus
-        1.0,   // tau_plus
-        1.0,   // tau_minus
-        2.0,   // w_max
-        0.0,   // w_min
+        0.05, // a_plus
+        0.04, // a_minus
+        0.02, // tau_plus
+        0.02, // tau_minus
+        1.0,  // w_max
+        0.0,  // w_min
     );
 
     // 2. Generate Simple Data (Two Patterns)
     // Pattern A: Inputs 0-4 are active
     // Pattern B: Inputs 5-9 are active
-    let mut patterns = vec![
+    let patterns = vec![
         (0, vec![1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
         (1, vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
     ];
-    // normalise patterns weights
-    // for pattern in patterns.iter_mut() {
-    //     let sum: f64 = pattern.1.iter().sum();
-    //     if sum > 0.0 {
-    //         for weight in pattern.1.iter_mut() {
-    //             *weight /= sum;
-    //         }
-    //     }
-    // }
+    // Patterns remain with magnitude 1.0 for active inputs to ensure sufficient spike rate.
 
     let dt = 0.001; // 1ms
     let sim_time = 0.3; // 300ms per pattern
@@ -81,7 +73,7 @@ fn main() {
     println!("Training...");
     let mut metrics = TrainingMetrics::new(num_neurons);
 
-    let num_epochs = 5;
+    let num_epochs = 100;
     for epoch in 0..num_epochs {
         metrics.reset_epoch();
         for (_label, data) in &patterns {
@@ -94,18 +86,26 @@ fn main() {
                     .map(|(i, &val)| encoders[i].step(val, dt, current_time))
                     .collect();
 
+                let potentials_before = model.neurons.iter().map(|n| n.v).collect::<Vec<_>>();
                 let output_spikes = model.step(&input_spikes, dt, current_time);
 
-                let winner = model.neuron_idx_with_highest_membrane_potential();
                 let mut filtered_spikes = vec![false; num_neurons];
 
-                // if winner neuron spiked
-                if output_spikes[winner] {
+                // Lateral Inhibition (Winner-Takes-All):
+                // We pick the "winner" from neurons that spiked, based on potential BEFORE the reset.
+                if let Some(winner) = output_spikes
+                    .iter()
+                    .enumerate()
+                    .filter(|&(_, &spiked)| spiked)
+                    .max_by(|(i, _), (j, _)| {
+                        potentials_before[*i]
+                            .partial_cmp(&potentials_before[*j])
+                            .unwrap()
+                    })
+                    .map(|(i, _)| i)
+                {
                     filtered_spikes[winner] = true;
 
-                    // Lateral Inhibition: When one neuron spikes, it inhibits others
-                    // by resetting their potential, forcing neurons to compete and specialize
-                    // in different patterns.
                     for (i, neuron) in model.neurons.iter_mut().enumerate() {
                         if i != winner {
                             neuron.v = neuron.v_reset;
@@ -123,10 +123,12 @@ fn main() {
                 metrics.record(&filtered_spikes);
                 current_time += dt;
             }
+            model.normalise_weights(1.0);
         }
-        //if (epoch + 1) % 10 == 0 {
-        metrics.report(epoch + 1, dt);
-        // }
+        if (epoch + 1) % 1 == 0 {
+            metrics.report(epoch + 1, dt);
+        }
+        // model.normalise_weights(2.0);
     }
 
     // 4. Calibration: Map neurons to labels
@@ -141,7 +143,7 @@ fn main() {
                 .enumerate()
                 .map(|(i, &val)| encoders[i].step(val, dt, current_time))
                 .collect();
-            let output_spikes = model.step(&input_spikes, dt, current_time);
+            let _output_spikes = model.step(&input_spikes, dt, current_time);
 
             //neuron_selectivity[winner][*label] += 1;
             // if let Some(winner) = output_spikes.iter().position(|&s| s) {
@@ -158,7 +160,7 @@ fn main() {
         }
 
         let winner = model.neuron_idx_with_highest_membrane_potential();
-        neuron_selectivity[winner][*label] = winner;
+        neuron_selectivity[winner][*label] += 1;
     }
 
     let neuron_to_label: Vec<usize> = neuron_selectivity
@@ -177,7 +179,6 @@ fn main() {
         let idx = if rand::random::<bool>() { 0 } else { 1 };
         let (label, data) = &patterns[idx];
 
-        let mut spike_counts = vec![0; num_neurons];
         let mut current_time = 0.0;
         model.reset();
 
@@ -188,7 +189,7 @@ fn main() {
                 .map(|(i, &val)| encoders[i].step(val, dt, current_time))
                 .collect();
 
-            let output_spikes = model.step(&input_spikes, dt, current_time);
+            let _output_spikes = model.step(&input_spikes, dt, current_time);
 
             // if let Some(winner) = output_spikes.iter().position(|&s| s) {
             //     spike_counts[winner] += 1;
@@ -222,12 +223,5 @@ fn main() {
     println!("Accuracy: {:.2}%", accuracy);
 
     // Print weights for inspection
-    println!("Final Weights:");
-    for i in 0..num_neurons {
-        print!("  Neuron {}: ", i);
-        for j in 0..num_inputs {
-            print!("{:.2} ", model.weights[i][j]);
-        }
-        println!();
-    }
+    model.print_weights();
 }
