@@ -37,6 +37,14 @@ impl Model {
         }
     }
 
+    pub fn randomize_weights(&mut self, min_weight: f64, max_weight: f64) {
+        for neuron_weights in &mut self.weights {
+            for weight in neuron_weights.iter_mut() {
+                *weight = rand::random::<f64>() * (max_weight - min_weight) + min_weight;
+            }
+        }
+    }
+
     pub fn normalise_weights(&mut self, target_sum: f64) {
         for neuron_weights in &mut self.weights {
             let sum: f64 = neuron_weights.iter().sum();

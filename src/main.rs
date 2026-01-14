@@ -13,13 +13,6 @@ use crate::{neuron::LIFNeuron, training_metrics::TrainingMetrics};
 fn main() {
     println!("Rusty Spike SNN Simulation");
 
-    // While the accuracy for this 2-neuron network on short simulation times
-    // is currently around 45-56%, the underlying STDP and training infrastructure
-    // is fully functional. Improving accuracy further would typically involve
-    // larger populations of neurons, longer simulation windows, and potentially
-    // homeostatic mechanisms to prevent all neurons from gravitating towards the
-    // same pattern.
-
     // 1. Setup Model and Training Params
     let num_inputs = 10;
     let num_neurons = 2;
@@ -36,10 +29,7 @@ fn main() {
     let mut model = Model::new(num_neurons, num_inputs, neuron_template);
 
     // Initialize weights randomly but low
-    for j in 0..num_inputs {
-        model.set_weight(0, j, rand::random::<f64>() * 0.2);
-        model.set_weight(1, j, rand::random::<f64>() * 0.2);
-    }
+    model.randomize_weights(0.0, 0.2);
     model.print_weights();
 
     let stdp = STDP::new(
