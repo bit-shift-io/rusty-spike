@@ -1,10 +1,12 @@
 mod encoding;
+mod labeling;
 mod model;
 mod neuron;
 mod training;
 mod training_metrics;
 
 use encoding::{Encoder, RateEncoder};
+use labeling::Labeler;
 use model::Model;
 use training::STDP;
 
@@ -15,7 +17,7 @@ fn main() {
 
     // 1. Setup Model and Training Params
     let num_inputs = 10;
-    let num_neurons = 2;
+    let num_neurons = 3;
     let neuron_template = LIFNeuron::new(
         -70.0, // v_rest
         -70.0, // v_reset
@@ -41,12 +43,14 @@ fn main() {
         0.0,  // w_min
     );
 
-    // 2. Generate Simple Data (Two Patterns)
-    // Pattern A: Inputs 0-4 are active
-    // Pattern B: Inputs 5-9 are active
+    // 2. Generate Simple Data (Three Patterns)
+    // Pattern A: Inputs 0-2 are active
+    // Pattern B: Inputs 3-5 are active
+    // Pattern C: Inputs 6-9 are active
     let patterns = vec![
-        (0, vec![1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
-        (1, vec![0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0]),
+        (0, vec![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        (1, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]),
+        (2, vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]),
     ];
 
     let dt = 0.001; // 1ms
@@ -76,29 +80,9 @@ fn main() {
                 let potentials_before = model.neurons.iter().map(|n| n.v).collect::<Vec<_>>();
                 let output_spikes = model.step(&input_spikes, dt, current_time);
 
-                let mut filtered_spikes = vec![false; num_neurons];
-
                 // Lateral Inhibition (Winner-Takes-All):
-                if let Some(winner) = output_spikes
-                    .iter()
-                    .enumerate()
-                    .filter(|&(_, &spiked)| spiked)
-                    .max_by(|(i, _), (j, _)| {
-                        potentials_before[*i]
-                            .partial_cmp(&potentials_before[*j])
-                            .unwrap()
-                    })
-                    .map(|(i, _)| i)
-                {
-                    filtered_spikes[winner] = true;
-
-                    // Stronger inhibition: Reset membrane potential of losers
-                    for (i, neuron) in model.neurons.iter_mut().enumerate() {
-                        if i != winner {
-                            neuron.v = neuron.v_reset;
-                        }
-                    }
-                }
+                let filtered_spikes =
+                    model.apply_lateral_inhibition(&output_spikes, &potentials_before);
 
                 stdp.update(
                     &mut model,
@@ -120,7 +104,9 @@ fn main() {
 
     // 4. Calibration: Map neurons to labels
     println!("Calibrating labels...");
+    let mut labeler = Labeler::new(num_neurons);
     let mut neuron_selectivity = vec![vec![0; patterns.len()]; num_neurons];
+
     for (label, data) in &patterns {
         model.reset();
         let mut current_time = 0.0;
@@ -136,22 +122,12 @@ fn main() {
             let output_spikes = model.step(&input_spikes, dt, current_time);
 
             // WTA during calibration as well
-            if let Some(winner) = output_spikes
-                .iter()
-                .enumerate()
-                .filter(|&(_, &spiked)| spiked)
-                .max_by(|(i, _), (j, _)| {
-                    potentials_before[*i]
-                        .partial_cmp(&potentials_before[*j])
-                        .unwrap()
-                })
-                .map(|(i, _)| i)
-            {
-                spike_counts[winner] += 1;
-                for (i, neuron) in model.neurons.iter_mut().enumerate() {
-                    if i != winner {
-                        neuron.v = neuron.v_reset;
-                    }
+            let filtered_spikes =
+                model.apply_lateral_inhibition(&output_spikes, &potentials_before);
+
+            for (i, &s) in filtered_spikes.iter().enumerate() {
+                if s {
+                    spike_counts[i] += 1;
                 }
             }
 
@@ -160,37 +136,12 @@ fn main() {
 
         // Record which neuron "won" most for this label
         for i in 0..num_neurons {
-            neuron_selectivity[i][*label] += spike_counts[i];
+            neuron_selectivity[i][*label] += spike_counts[i] as u32;
         }
     }
 
-    let neuron_to_label = if num_neurons == 2 {
-        // For 2 neurons, ensure they pick different labels if they both have preferences
-        let n0_pref0 = neuron_selectivity[0][0];
-        let n0_pref1 = neuron_selectivity[0][1];
-        let n1_pref0 = neuron_selectivity[1][0];
-        let n1_pref1 = neuron_selectivity[1][1];
-
-        if n0_pref0 >= n0_pref1 && n1_pref1 >= n1_pref0 {
-            vec![0, 1]
-        } else if n0_pref1 > n0_pref0 && n1_pref0 > n1_pref1 {
-            vec![1, 0]
-        } else {
-            // Collision! Pick labels based on strongest response
-            if n0_pref0 + n1_pref1 >= n0_pref1 + n1_pref0 {
-                vec![0, 1]
-            } else {
-                vec![1, 0]
-            }
-        }
-    } else {
-        neuron_selectivity
-            .iter()
-            .map(|counts| if counts[0] >= counts[1] { 0 } else { 1 })
-            .collect::<Vec<_>>()
-    };
-
-    println!("  Neuron labels: {:?}", neuron_to_label);
+    labeler.calibrate(&neuron_selectivity);
+    println!("  Neuron labels: {:?}", labeler.neuron_to_label);
 
     // 5. Evaluation
     println!("Evaluating...");
@@ -198,7 +149,7 @@ fn main() {
     let total = 100;
 
     for _ in 0..total {
-        let idx = if rand::random::<bool>() { 0 } else { 1 };
+        let idx = rand::random::<u32>() as usize % patterns.len();
         let (label, data) = &patterns[idx];
 
         let mut current_time = 0.0;
@@ -222,14 +173,7 @@ fn main() {
             current_time += dt;
         }
 
-        let prediction_neuron = spike_counts
-            .iter()
-            .enumerate()
-            .max_by_key(|&(_, count)| count)
-            .map(|(i, _)| i)
-            .unwrap();
-
-        let prediction = neuron_to_label[prediction_neuron];
+        let prediction = labeler.predict(&spike_counts);
 
         if prediction == *label {
             correct += 1;

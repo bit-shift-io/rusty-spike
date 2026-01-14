@@ -31,6 +31,7 @@ impl Model {
     }
 
     /// Sets the weight of a specific synapse.
+    #[allow(dead_code)]
     pub fn set_weight(&mut self, neuron_idx: usize, input_idx: usize, weight: f64) {
         if neuron_idx < self.weights.len() && input_idx < self.weights[0].len() {
             self.weights[neuron_idx][input_idx] = weight;
@@ -91,6 +92,40 @@ impl Model {
         }
 
         output_spikes
+    }
+
+    /// Applies lateral inhibition (Winner-Takes-All) based on membrane potentials.
+    /// Returns the filtered spikes (only the winner's spike is kept).
+    pub fn apply_lateral_inhibition(
+        &mut self,
+        output_spikes: &[bool],
+        potentials_before: &[f64],
+    ) -> Vec<bool> {
+        let num_neurons = self.neurons.len();
+        let mut filtered_spikes = vec![false; num_neurons];
+
+        if let Some(winner) = output_spikes
+            .iter()
+            .enumerate()
+            .filter(|&(_, &spiked)| spiked)
+            .max_by(|(i, _), (j, _)| {
+                potentials_before[*i]
+                    .partial_cmp(&potentials_before[*j])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(i, _)| i)
+        {
+            filtered_spikes[winner] = true;
+
+            // Inhibition: Reset membrane potential of others
+            for (i, neuron) in self.neurons.iter_mut().enumerate() {
+                if i != winner {
+                    neuron.v = neuron.v_reset;
+                }
+            }
+        }
+
+        filtered_spikes
     }
 
     pub fn reset(&mut self) {
