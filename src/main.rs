@@ -1,3 +1,4 @@
+mod data_loader;
 mod encoding;
 mod labeling;
 mod model;
@@ -5,6 +6,7 @@ mod neuron;
 mod training;
 mod training_metrics;
 
+use data_loader::MnistLoader;
 use encoding::{Encoder, RateEncoder};
 use labeling::Labeler;
 use model::Model;
@@ -15,24 +17,50 @@ use crate::{neuron::LIFNeuron, training_metrics::TrainingMetrics};
 fn main() {
     println!("Rusty Spike SNN Simulation");
 
-    // 1. Setup Model and Training Params
-    let num_inputs = 10;
-    let num_neurons = 3;
+    // 1. Load MNIST Data (Balanced subset and downsampled for speed)
+    println!("Loading MNIST data...");
+    let subset_size = 100;
+    let resolution = 14;
+    let mut train_set = MnistLoader::load_balanced_subset(
+        "data/mnist/train-images-idx3-ubyte",
+        "data/mnist/train-labels-idx1-ubyte",
+        subset_size,
+    )
+    .expect("Failed to load training data");
+    train_set.downsample(resolution);
+
+    let mut test_set = MnistLoader::load_balanced_subset(
+        "data/mnist/t10k-images-idx3-ubyte",
+        "data/mnist/t10k-labels-idx1-ubyte",
+        10,
+    )
+    .expect("Failed to load test data");
+    test_set.downsample(resolution);
+
+    println!(
+        "Loaded {} training samples and {} test samples",
+        train_set.len(),
+        test_set.len()
+    );
+
+    // 2. Setup Model and Training Params
+    let num_inputs = resolution * resolution; // Downsampled 14x14
+    let num_neurons = 10; // One for each digit (ideally more, but start small)
+
     let neuron_template = LIFNeuron::new(
         -70.0, // v_rest
         -70.0, // v_reset
         -55.0, // v_threshold_base
-        0.5,   // theta_plus (increased from 0.05)
-        0.001, // theta_decay (increased from 0.0001)
+        0.5,   // theta_plus
+        0.001, // theta_decay
         0.02,  // tau_m
         200.0, // r
         0.005, // refractory_period
     );
     let mut model = Model::new(num_neurons, num_inputs, neuron_template);
 
-    // Initialize weights randomly but low
-    model.randomize_weights(0.0, 0.2);
-    model.print_weights();
+    // Initialize weights randomly
+    model.randomize_weights(0.1, 0.5);
 
     let stdp = STDP::new(
         0.1,  // a_plus
@@ -43,31 +71,23 @@ fn main() {
         0.0,  // w_min
     );
 
-    // 2. Generate Simple Data (Three Patterns)
-    // Pattern A: Inputs 0-2 are active
-    // Pattern B: Inputs 3-5 are active
-    // Pattern C: Inputs 6-9 are active
-    let patterns = vec![
-        (0, vec![1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
-        (1, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]),
-        (2, vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]),
-    ];
-
     let dt = 0.001; // 1ms
     let sim_time = 0.35; // 350ms per pattern
     let steps = (sim_time / dt) as usize;
     let mut encoders = (0..num_inputs)
-        .map(|_| RateEncoder::new(200.0))
+        .map(|_| RateEncoder::new(200.0)) // High rate for MNIST
         .collect::<Vec<_>>();
 
     // 3. Training Loop
     println!("Training...");
     let mut metrics = TrainingMetrics::new(num_neurons);
 
-    let num_epochs = 20; // More epochs to allow homeostasis to settle
+    let num_epochs = 1;
+
     for epoch in 0..num_epochs {
         metrics.reset_epoch();
-        for (_label, data) in &patterns {
+        for i in 0..train_set.len() {
+            let data = &train_set.images[i];
             model.reset();
             let mut current_time = 0.0;
             for _step in 0..steps {
@@ -105,9 +125,12 @@ fn main() {
     // 4. Calibration: Map neurons to labels
     println!("Calibrating labels...");
     let mut labeler = Labeler::new(num_neurons);
-    let mut neuron_selectivity = vec![vec![0; patterns.len()]; num_neurons];
+    let mut neuron_selectivity = vec![vec![0; 10]; num_neurons];
 
-    for (label, data) in &patterns {
+    let calibration_samples = train_set.len().min(100);
+    for i in 0..calibration_samples {
+        let label = train_set.labels[i] as usize;
+        let data = &train_set.images[i];
         model.reset();
         let mut current_time = 0.0;
         let mut spike_counts = vec![0; num_neurons];
@@ -135,8 +158,8 @@ fn main() {
         }
 
         // Record which neuron "won" most for this label
-        for i in 0..num_neurons {
-            neuron_selectivity[i][*label] += spike_counts[i] as u32;
+        for j in 0..num_neurons {
+            neuron_selectivity[j][label] += spike_counts[j] as u32;
         }
     }
 
@@ -146,11 +169,11 @@ fn main() {
     // 5. Evaluation
     println!("Evaluating...");
     let mut correct = 0;
-    let total = 100;
+    let evaluation_samples = test_set.len();
 
-    for _ in 0..total {
-        let idx = rand::random::<u32>() as usize % patterns.len();
-        let (label, data) = &patterns[idx];
+    for i in 0..evaluation_samples {
+        let label = test_set.labels[i] as usize;
+        let data = &test_set.images[i];
 
         let mut current_time = 0.0;
         model.reset();
@@ -175,14 +198,14 @@ fn main() {
 
         let prediction = labeler.predict(&spike_counts);
 
-        if prediction == *label {
+        if prediction == label {
             correct += 1;
         }
     }
 
-    let accuracy = (correct as f64 / total as f64) * 100.0;
+    let accuracy = (correct as f64 / evaluation_samples as f64) * 100.0;
     println!("Accuracy: {:.2}%", accuracy);
 
     // Print weights for inspection
-    model.print_weights();
+    // model.print_weights();
 }
