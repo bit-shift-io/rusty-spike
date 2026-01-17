@@ -35,16 +35,6 @@ impl TrainingMetrics {
         }
     }
 
-    pub fn record_weight_change(&mut self, delta: f64) {
-        if delta > 0.0 {
-            self.weights_increased += 1;
-            self.total_increase += delta;
-        } else if delta < 0.0 {
-            self.weights_decreased += 1;
-            self.total_decrease += delta.abs();
-        }
-    }
-
     pub fn report(&self, epoch: usize, dt: f64) {
         let sim_time = self.total_steps as f64 * dt;
         let coverage = (self.ever_fired.len() as f64 / self.num_neurons as f64) * 100.0;

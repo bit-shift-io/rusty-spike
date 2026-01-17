@@ -1,4 +1,5 @@
 use crate::neuron::LIFNeuron;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// A Model represents a layer (or simple network) of spiking neurons.
@@ -41,15 +42,15 @@ impl Model {
     }
 
     pub fn randomize_weights(&mut self, min_weight: f64, max_weight: f64) {
-        for neuron_weights in &mut self.weights {
+        self.weights.par_iter_mut().for_each(|neuron_weights| {
             for weight in neuron_weights.iter_mut() {
                 *weight = rand::random::<f64>() * (max_weight - min_weight) + min_weight;
             }
-        }
+        });
     }
 
     pub fn normalise_weights(&mut self, target_sum: f64) {
-        for neuron_weights in &mut self.weights {
+        self.weights.par_iter_mut().for_each(|neuron_weights| {
             let sum: f64 = neuron_weights.iter().sum();
             if sum > 0.0 {
                 let factor = target_sum / sum;
@@ -57,7 +58,7 @@ impl Model {
                     *weight = (*weight * factor).min(1.0).max(0.0);
                 }
             }
-        }
+        });
     }
 
     /// Performs a single simulation step.
@@ -68,8 +69,6 @@ impl Model {
     ///
     /// Returns a vector of booleans indicating which neurons in the model spiked.
     pub fn step(&mut self, input_spikes: &[bool], dt: f64, current_time: f64) -> Vec<bool> {
-        let mut output_spikes = Vec::with_capacity(self.neurons.len());
-
         // Update input spike times
         for (j, &spiked) in input_spikes.iter().enumerate() {
             if spiked && j < self.last_input_spike_times.len() {
@@ -77,21 +76,22 @@ impl Model {
             }
         }
 
-        for (i, neuron) in self.neurons.iter_mut().enumerate() {
-            // Calculate total input current for this neuron
-            let mut i_ext = 0.0;
-            for (j, &spiked) in input_spikes.iter().enumerate() {
-                if spiked && j < self.weights[i].len() {
-                    i_ext += self.weights[i][j];
+        self.neurons
+            .par_iter_mut()
+            .zip(self.weights.par_iter())
+            .map(|(neuron, neuron_weights)| {
+                // Calculate total input current for this neuron
+                let mut i_ext = 0.0;
+                for (j, &spiked) in input_spikes.iter().enumerate() {
+                    if spiked && j < neuron_weights.len() {
+                        i_ext += neuron_weights[j];
+                    }
                 }
-            }
 
-            // Update neuron state. returns true if v >= threshold
-            let would_fire = neuron.step(i_ext, dt, current_time);
-            output_spikes.push(would_fire);
-        }
-
-        output_spikes
+                // Update neuron state. returns true if v >= threshold
+                neuron.step(i_ext, dt, current_time)
+            })
+            .collect()
     }
 
     /// Applies lateral inhibition (Winner-Takes-All) based on membrane potentials.
@@ -157,6 +157,7 @@ impl Model {
     //         .unwrap()
     // }
 
+    #[allow(dead_code)]
     pub fn print_weights(&self) {
         // Print weights for inspection
         println!("Weights:");

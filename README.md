@@ -7,12 +7,10 @@
 
 ## Todo
 
-* Load/save model weights
 * Image normalisation
 * Check refractory_period
 * Self balancing or hyperparam calculator/matrix/tuning tool
 * Graphing / visualisations / csv outputs / logging
-* Multithreading
 * Image jitter/warping/blending to make extra training data
 
 ## References

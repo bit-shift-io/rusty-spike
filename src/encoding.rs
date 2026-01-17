@@ -8,6 +8,7 @@ pub trait Encoder {
 
 /// Rate Coding: Converts input intensity into a spike train.
 /// Uses a deterministic accumulator-based approach for more stability.
+#[derive(Clone)]
 pub struct RateEncoder {
     /// Gain factor for the input (maps input to firing rate in Hz)
     pub gain: f64,
@@ -48,6 +49,7 @@ impl Encoder for RateEncoder {
 /// Latency Coding: Input intensity determines the timing of the first spike.
 /// Higher input results in an earlier spike.
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct LatencyEncoder {
     /// Time constant for the latency decay
     pub tau: f64,
@@ -98,6 +100,7 @@ impl Encoder for LatencyEncoder {
 /// Delta Modulation: Emits a spike when the change in input exceeds a threshold.
 /// This captures the derivative of the signal.
 #[allow(dead_code)]
+#[derive(Clone)]
 pub struct DeltaEncoder {
     /// Threshold for the change in signal
     pub threshold: f64,

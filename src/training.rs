@@ -1,5 +1,6 @@
 use crate::model::Model;
 use crate::training_metrics::TrainingMetrics;
+use rayon::prelude::*;
 
 /// Spike-timing-dependent plasticity (STDP) parameters.
 pub struct STDP {
@@ -56,48 +57,80 @@ impl STDP {
         current_time: f64,
         metrics: &mut TrainingMetrics,
     ) {
-        // 1. Post-synaptic spike: Potentiate weights from inputs that spiked recently
-        for (i, &post_spiked) in output_spikes.iter().enumerate() {
-            if post_spiked {
-                for j in 0..model.last_input_spike_times.len() {
-                    if let Some(t_pre) = model.last_input_spike_times[j] {
-                        if t_pre <= current_time {
-                            let dt = current_time - t_pre;
-                            // Soft-bound potentiation: dw = a_plus * exp(-dt/tau) * (w_max - w)
-                            let dw = self.a_plus
-                                * (-dt / self.tau_plus).exp()
-                                * (self.w_max - model.weights[i][j]);
-                            let old_weight = model.weights[i][j];
-                            let new_weight = (old_weight + dw).min(self.w_max);
-                            model.weights[i][j] = new_weight;
-                            let actual_dw = new_weight - old_weight;
-                            metrics.record_weight_change(actual_dw);
-                        }
-                    }
-                }
-            }
-        }
+        let last_input_spike_times = &model.last_input_spike_times;
 
-        // 2. Pre-synaptic spike: Depress weights to neurons that spiked recently
-        for (j, &pre_spiked) in input_spikes.iter().enumerate() {
-            if pre_spiked {
-                for i in 0..model.neurons.len() {
-                    if let Some(t_post) = model.neurons[i].last_spike_time {
-                        if t_post <= current_time {
-                            let dt = current_time - t_post;
-                            // Soft-bound depression: dw = a_minus * exp(-dt/tau) * (w - w_min)
-                            let dw = self.a_minus
-                                * (-dt / self.tau_minus).exp()
-                                * (model.weights[i][j] - self.w_min);
-                            let old_weight = model.weights[i][j];
-                            let new_weight = (old_weight - dw).max(self.w_min);
-                            model.weights[i][j] = new_weight;
-                            let actual_dw = new_weight - old_weight;
-                            metrics.record_weight_change(actual_dw);
+        let results: Vec<(usize, usize, f64, f64)> = model
+            .neurons
+            .par_iter_mut()
+            .zip(model.weights.par_iter_mut())
+            .enumerate()
+            .map(|(i, (neuron, neuron_weights))| {
+                let mut local_increased = 0;
+                let mut local_decreased = 0;
+                let mut local_total_increase = 0.0;
+                let mut local_total_decrease = 0.0;
+
+                // 1. Post-synaptic spike: Potentiate weights from inputs that spiked recently
+                if output_spikes[i] {
+                    for j in 0..last_input_spike_times.len() {
+                        if let Some(t_pre) = last_input_spike_times[j] {
+                            if t_pre <= current_time {
+                                let dt = current_time - t_pre;
+                                // Soft-bound potentiation: dw = a_plus * exp(-dt/tau) * (w_max - w)
+                                let dw = self.a_plus
+                                    * (-dt / self.tau_plus).exp()
+                                    * (self.w_max - neuron_weights[j]);
+                                let old_weight = neuron_weights[j];
+                                let new_weight = (old_weight + dw).min(self.w_max);
+                                neuron_weights[j] = new_weight;
+
+                                let actual_dw = new_weight - old_weight;
+                                if actual_dw > 0.0 {
+                                    local_increased += 1;
+                                    local_total_increase += actual_dw;
+                                }
+                            }
                         }
                     }
                 }
-            }
+
+                // 2. Pre-synaptic spike: Depress weights to neurons that spiked recently
+                if let Some(t_post) = neuron.last_spike_time {
+                    if t_post <= current_time {
+                        let dt = current_time - t_post;
+                        let decay = (-dt / self.tau_minus).exp();
+                        for (j, &pre_spiked) in input_spikes.iter().enumerate() {
+                            if pre_spiked {
+                                // Soft-bound depression: dw = a_minus * exp(-dt/tau) * (w - w_min)
+                                let dw = self.a_minus * decay * (neuron_weights[j] - self.w_min);
+                                let old_weight = neuron_weights[j];
+                                let new_weight = (old_weight - dw).max(self.w_min);
+                                neuron_weights[j] = new_weight;
+
+                                let actual_dw = new_weight - old_weight;
+                                if actual_dw < 0.0 {
+                                    local_decreased += 1;
+                                    local_total_decrease += actual_dw.abs();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                (
+                    local_increased,
+                    local_decreased,
+                    local_total_increase,
+                    local_total_decrease,
+                )
+            })
+            .collect();
+
+        for (inc, dec, inc_val, dec_val) in results {
+            metrics.weights_increased += inc;
+            metrics.weights_decreased += dec;
+            metrics.total_increase += inc_val;
+            metrics.total_decrease += dec_val;
         }
     }
 }

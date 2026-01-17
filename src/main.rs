@@ -16,6 +16,7 @@ use training::STDP;
 
 use crate::neuron::LIFNeuron;
 use crate::training_metrics::TrainingMetrics;
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::Path;
@@ -113,7 +114,7 @@ fn main() {
     let mut metrics = TrainingMetrics::new(num_neurons);
     model.reset_all(); // Initial reset to clear theta
 
-    let num_epochs = 15;
+    let num_epochs = 5;
 
     for epoch in start_epoch..(start_epoch + num_epochs) {
         print!("Epoch {}", epoch);
@@ -190,39 +191,51 @@ fn main() {
     let mut labeler = Labeler::new(num_neurons);
     let mut neuron_selectivity = vec![vec![0usize; 10]; num_neurons];
 
-    for i in 0..train_set.len() {
-        let label = train_set.labels[i] as usize;
-        let data = &train_set.images[i];
-        model.reset();
-        for encoder in encoders.iter_mut() {
-            encoder.reset();
-        }
+    let neuron_selectivity_results: Vec<(usize, Vec<usize>)> = (0..train_set.len())
+        .into_par_iter()
+        .map(|i| {
+            let label = train_set.labels[i] as usize;
+            let data = &train_set.images[i];
+            let mut local_model = model.clone();
+            let mut local_encoders = encoders.clone();
 
-        let mut current_time = 0.0;
-        let mut spike_counts = vec![0usize; num_neurons];
-        for _step in 0..steps {
-            let input_spikes: Vec<bool> = data
-                .iter()
-                .enumerate()
-                .map(|(i, &val)| encoders[i].step(val, dt, current_time))
-                .collect();
-
-            let potentials_before = model.neurons.iter().map(|n| n.v).collect::<Vec<_>>();
-            let output_spikes = model.step(&input_spikes, dt, current_time);
-
-            // WTA during calibration as well
-            let filtered_spikes =
-                model.apply_lateral_inhibition(&output_spikes, &potentials_before, current_time);
-
-            for (i, &s) in filtered_spikes.iter().enumerate() {
-                if s {
-                    spike_counts[i] += 1;
-                }
+            local_model.reset();
+            for encoder in local_encoders.iter_mut() {
+                encoder.reset();
             }
 
-            current_time += dt;
-        }
+            let mut current_time = 0.0;
+            let mut spike_counts = vec![0usize; num_neurons];
+            for _step in 0..steps {
+                let input_spikes: Vec<bool> = data
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &val)| local_encoders[i].step(val, dt, current_time))
+                    .collect();
 
+                let potentials_before = local_model.neurons.iter().map(|n| n.v).collect::<Vec<_>>();
+                let output_spikes = local_model.step(&input_spikes, dt, current_time);
+
+                // WTA during calibration as well
+                let filtered_spikes = local_model.apply_lateral_inhibition(
+                    &output_spikes,
+                    &potentials_before,
+                    current_time,
+                );
+
+                for (idx, &s) in filtered_spikes.iter().enumerate() {
+                    if s {
+                        spike_counts[idx] += 1;
+                    }
+                }
+
+                current_time += dt;
+            }
+            (label, spike_counts)
+        })
+        .collect();
+
+    for (label, spike_counts) in neuron_selectivity_results {
         // Record which neuron "won" most for this label
         for j in 0..num_neurons {
             neuron_selectivity[j][label] += spike_counts[j];
@@ -234,50 +247,56 @@ fn main() {
 
     // 5. Evaluation
     println!("Evaluating...");
-    let mut correct = 0;
     let evaluation_samples = test_set.len();
     assert!(evaluation_samples > 0);
 
-    for i in 0..test_set.len() {
-        let label = test_set.labels[i] as usize;
-        let data = &test_set.images[i];
+    let correct: usize = (0..test_set.len())
+        .into_par_iter()
+        .map(|i| {
+            let label = test_set.labels[i] as usize;
+            let data = &test_set.images[i];
 
-        let mut current_time = 0.0;
-        model.reset();
-        for encoder in encoders.iter_mut() {
-            encoder.reset();
-        }
+            let mut current_time = 0.0;
+            let mut local_model = model.clone();
+            let mut local_encoders = encoders.clone();
 
-        let mut spike_counts = vec![0usize; num_neurons];
-
-        for _step in 0..steps {
-            let input_spikes: Vec<bool> = data
-                .iter()
-                .enumerate()
-                .map(|(i, &val)| encoders[i].step(val, dt, current_time))
-                .collect();
-
-            let potentials_before = model.neurons.iter().map(|n| n.v).collect::<Vec<_>>();
-            let output_spikes = model.step(&input_spikes, dt, current_time);
-
-            // WTA during evaluation is critical for consistency
-            let filtered_spikes =
-                model.apply_lateral_inhibition(&output_spikes, &potentials_before, current_time);
-
-            for (j, &s) in filtered_spikes.iter().enumerate() {
-                if s {
-                    spike_counts[j] += 1;
-                }
+            local_model.reset();
+            for encoder in local_encoders.iter_mut() {
+                encoder.reset();
             }
-            current_time += dt;
-        }
 
-        let prediction = labeler.predict(&spike_counts);
+            let mut spike_counts = vec![0usize; num_neurons];
 
-        if prediction == label {
-            correct += 1;
-        }
-    }
+            for _step in 0..steps {
+                let input_spikes: Vec<bool> = data
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &val)| local_encoders[i].step(val, dt, current_time))
+                    .collect();
+
+                let potentials_before = local_model.neurons.iter().map(|n| n.v).collect::<Vec<_>>();
+                let output_spikes = local_model.step(&input_spikes, dt, current_time);
+
+                // WTA during evaluation is critical for consistency
+                let filtered_spikes = local_model.apply_lateral_inhibition(
+                    &output_spikes,
+                    &potentials_before,
+                    current_time,
+                );
+
+                for (j, &s) in filtered_spikes.iter().enumerate() {
+                    if s {
+                        spike_counts[j] += 1;
+                    }
+                }
+                current_time += dt;
+            }
+
+            let prediction = labeler.predict(&spike_counts);
+
+            if prediction == label { 1 } else { 0 }
+        })
+        .sum();
 
     let accuracy = (correct as f64 / test_set.len() as f64) * 100.0;
     println!("Accuracy: {:.2}%", accuracy);
