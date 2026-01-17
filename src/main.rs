@@ -19,8 +19,8 @@ fn main() {
 
     // 1. Load MNIST Data (Balanced subset and downsampled for speed)
     println!("Loading MNIST data...");
-    let subset_size = 100;
-    let resolution = 10;
+    let subset_size = 1000;
+    let resolution = 14;
     let mut train_set = MnistLoader::load_balanced_subset(
         "data/mnist/train-images-idx3-ubyte",
         "data/mnist/train-labels-idx1-ubyte",
@@ -28,11 +28,12 @@ fn main() {
     )
     .expect("Failed to load training data");
     train_set.downsample(resolution);
+    train_set.shuffle();
 
     let mut test_set = MnistLoader::load_balanced_subset(
         "data/mnist/t10k-images-idx3-ubyte",
         "data/mnist/t10k-labels-idx1-ubyte",
-        20,
+        100,
     )
     .expect("Failed to load test data");
     test_set.downsample(resolution);
@@ -44,18 +45,18 @@ fn main() {
     );
 
     // 2. Setup Model and Training Params
-    let num_inputs = resolution * resolution; // Downsampled 14x14
-    let num_neurons = 20; // At least 1 neuron for each digit (ideally more, but start small)
+    let num_inputs = resolution * resolution;
+    let num_neurons = 100; // More neurons for better representation
 
     let neuron_template = LIFNeuron::new(
-        -70.0, // v_rest
-        -70.0, // v_reset
-        -55.0, // v_threshold_base
-        0.5,   // theta_plus
-        0.001, // theta_decay
-        0.02,  // tau_m
-        200.0, // r
-        0.005, // refractory_period
+        -70.0,  // v_rest
+        -70.0,  // v_reset
+        -55.0,  // v_threshold_base
+        1.5,    // theta_plus (Increase for more diversity)
+        0.0005, // theta_decay (Slower decay to maintain competition)
+        0.02,   // tau_m
+        200.0,  // r
+        0.005,  // refractory_period
     );
     let mut model = Model::new(num_neurons, num_inputs, neuron_template);
 
@@ -64,8 +65,8 @@ fn main() {
     model.print_weights();
 
     let stdp = STDP::new(
-        0.1,  // a_plus
-        0.08, // a_minus
+        0.05, // a_plus (Slower learning)
+        0.04, // a_minus
         0.02, // tau_plus
         0.02, // tau_minus
         1.0,  // w_max
@@ -113,11 +114,14 @@ fn main() {
                     &mut metrics,
                 );
                 // Enforce weight normalization to maintain competition
-                model.normalise_weights(2.0 * num_neurons as f64);
                 metrics.record(&filtered_spikes);
                 current_time += dt;
             }
+            // Enforce weight normalization to maintain competition after each pattern
+            model.normalise_weights(0.4 * num_inputs as f64);
         }
+        train_set.shuffle();
+
         if (epoch + 1) % 1 == 0 {
             metrics.report(epoch + 1, dt);
             model.print_weights();
@@ -129,8 +133,7 @@ fn main() {
     let mut labeler = Labeler::new(num_neurons);
     let mut neuron_selectivity = vec![vec![0; 10]; num_neurons];
 
-    let calibration_samples = train_set.len().min(100);
-    for i in 0..calibration_samples {
+    for i in 0..train_set.len() {
         let label = train_set.labels[i] as usize;
         let data = &train_set.images[i];
         model.reset();
@@ -189,8 +192,14 @@ fn main() {
                 .map(|(i, &val)| encoders[i].step(val, dt, current_time))
                 .collect();
 
+            let potentials_before = model.neurons.iter().map(|n| n.v).collect::<Vec<_>>();
             let output_spikes = model.step(&input_spikes, dt, current_time);
-            for (i, &s) in output_spikes.iter().enumerate() {
+
+            // WTA during evaluation is critical for consistency
+            let filtered_spikes =
+                model.apply_lateral_inhibition(&output_spikes, &potentials_before);
+
+            for (i, &s) in filtered_spikes.iter().enumerate() {
                 if s {
                     spike_counts[i] += 1;
                 }
