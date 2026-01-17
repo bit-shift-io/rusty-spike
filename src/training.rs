@@ -60,18 +60,19 @@ impl STDP {
         for (i, &post_spiked) in output_spikes.iter().enumerate() {
             if post_spiked {
                 for j in 0..model.last_input_spike_times.len() {
-                    let t_pre = model.last_input_spike_times[j];
-                    if t_pre <= current_time && t_pre > -f64::INFINITY {
-                        let dt = current_time - t_pre;
-                        // Soft-bound potentiation: dw = a_plus * exp(-dt/tau) * (w_max - w)
-                        let dw = self.a_plus
-                            * (-dt / self.tau_plus).exp()
-                            * (self.w_max - model.weights[i][j]);
-                        let old_weight = model.weights[i][j];
-                        let new_weight = (old_weight + dw).min(self.w_max);
-                        model.weights[i][j] = new_weight;
-                        let actual_dw = new_weight - old_weight;
-                        metrics.record_weight_change(actual_dw);
+                    if let Some(t_pre) = model.last_input_spike_times[j] {
+                        if t_pre <= current_time {
+                            let dt = current_time - t_pre;
+                            // Soft-bound potentiation: dw = a_plus * exp(-dt/tau) * (w_max - w)
+                            let dw = self.a_plus
+                                * (-dt / self.tau_plus).exp()
+                                * (self.w_max - model.weights[i][j]);
+                            let old_weight = model.weights[i][j];
+                            let new_weight = (old_weight + dw).min(self.w_max);
+                            model.weights[i][j] = new_weight;
+                            let actual_dw = new_weight - old_weight;
+                            metrics.record_weight_change(actual_dw);
+                        }
                     }
                 }
             }
@@ -81,18 +82,19 @@ impl STDP {
         for (j, &pre_spiked) in input_spikes.iter().enumerate() {
             if pre_spiked {
                 for i in 0..model.neurons.len() {
-                    let t_post = model.neurons[i].last_spike_time;
-                    if t_post <= current_time && t_post > -f64::INFINITY {
-                        let dt = current_time - t_post;
-                        // Soft-bound depression: dw = a_minus * exp(-dt/tau) * (w - w_min)
-                        let dw = self.a_minus
-                            * (-dt / self.tau_minus).exp()
-                            * (model.weights[i][j] - self.w_min);
-                        let old_weight = model.weights[i][j];
-                        let new_weight = (old_weight - dw).max(self.w_min);
-                        model.weights[i][j] = new_weight;
-                        let actual_dw = new_weight - old_weight;
-                        metrics.record_weight_change(actual_dw);
+                    if let Some(t_post) = model.neurons[i].last_spike_time {
+                        if t_post <= current_time {
+                            let dt = current_time - t_post;
+                            // Soft-bound depression: dw = a_minus * exp(-dt/tau) * (w - w_min)
+                            let dw = self.a_minus
+                                * (-dt / self.tau_minus).exp()
+                                * (model.weights[i][j] - self.w_min);
+                            let old_weight = model.weights[i][j];
+                            let new_weight = (old_weight - dw).max(self.w_min);
+                            model.weights[i][j] = new_weight;
+                            let actual_dw = new_weight - old_weight;
+                            metrics.record_weight_change(actual_dw);
+                        }
                     }
                 }
             }
@@ -112,7 +114,7 @@ mod tests {
         let mut metrics = TrainingMetrics::new(1);
 
         // Simulate a pre-synaptic spike at t=0.01
-        model.last_input_spike_times[0] = 0.01;
+        model.last_input_spike_times[0] = Some(0.01);
 
         // Post-synaptic spike at t=0.02
         stdp.update(&mut model, &[true], &[false], 0.02, &mut metrics);
@@ -129,7 +131,7 @@ mod tests {
         model.weights[0][0] = 0.5;
 
         // Post-synaptic spike at t=0.01
-        model.neurons[0].last_spike_time = 0.01;
+        model.neurons[0].last_spike_time = Some(0.01);
 
         // Pre-synaptic spike at t=0.02
         stdp.update(&mut model, &[false], &[true], 0.02, &mut metrics);

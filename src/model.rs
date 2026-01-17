@@ -1,7 +1,9 @@
 use crate::neuron::LIFNeuron;
+use serde::{Deserialize, Serialize};
 
 /// A Model represents a layer (or simple network) of spiking neurons.
 /// It manages the neurons and their synaptic connections from external inputs.
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Model {
     /// The neurons in this model
     pub neurons: Vec<LIFNeuron>,
@@ -9,7 +11,7 @@ pub struct Model {
     /// weights[i][j] is the weight from input j to neuron i.
     pub weights: Vec<Vec<f64>>,
     /// Last time each input channel spiked (seconds).
-    pub last_input_spike_times: Vec<f64>,
+    pub last_input_spike_times: Vec<Option<f64>>,
 }
 
 impl Model {
@@ -21,7 +23,7 @@ impl Model {
 
         // Initialize weights to 0.0
         let weights = vec![vec![0.0; num_inputs]; num_neurons];
-        let last_input_spike_times = vec![-f64::INFINITY; num_inputs];
+        let last_input_spike_times = vec![None; num_inputs];
 
         Self {
             neurons,
@@ -71,7 +73,7 @@ impl Model {
         // Update input spike times
         for (j, &spiked) in input_spikes.iter().enumerate() {
             if spiked && j < self.last_input_spike_times.len() {
-                self.last_input_spike_times[j] = current_time;
+                self.last_input_spike_times[j] = Some(current_time);
             }
         }
 

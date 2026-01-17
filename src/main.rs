@@ -3,6 +3,7 @@ mod encoding;
 mod labeling;
 mod model;
 mod neuron;
+mod persistence;
 mod training;
 mod training_metrics;
 
@@ -10,9 +11,14 @@ use data_loader::MnistLoader;
 use encoding::{Encoder, RateEncoder};
 use labeling::Labeler;
 use model::Model;
+use persistence::ModelCheckpoint;
 use training::STDP;
 
-use crate::{neuron::LIFNeuron, training_metrics::TrainingMetrics};
+use crate::neuron::LIFNeuron;
+use crate::training_metrics::TrainingMetrics;
+use std::collections::HashMap;
+use std::io::{self, Write};
+use std::path::Path;
 
 fn main() {
     println!("Rusty Spike SNN Simulation");
@@ -58,10 +64,33 @@ fn main() {
         200.0, // r
         0.005, // refractory_period
     );
-    let mut model = Model::new(num_neurons, num_inputs, neuron_template);
 
-    // Initialize weights randomly but reasonably
-    model.randomize_weights(0.05, 0.4);
+    let checkpoint_path = "model_checkpoint.json";
+    let (mut model, start_epoch) = if Path::new(checkpoint_path).exists() {
+        println!("Loading existing model from {}...", checkpoint_path);
+        match ModelCheckpoint::load(checkpoint_path) {
+            Ok(cp) => {
+                let epoch = cp
+                    .metadata
+                    .get("epoch")
+                    .and_then(|e| e.parse::<usize>().ok())
+                    .unwrap_or(0);
+                println!("Resuming from epoch {}", epoch);
+                (cp.model, epoch)
+            }
+            Err(e) => {
+                println!("Warning: Failed to load checkpoint: {}. Starting fresh.", e);
+                let mut fresh_model = Model::new(num_neurons, num_inputs, neuron_template);
+                fresh_model.randomize_weights(0.05, 0.4);
+                (fresh_model, 0)
+            }
+        }
+    } else {
+        println!("No checkpoint found. Initializing new model.");
+        let mut fresh_model = Model::new(num_neurons, num_inputs, neuron_template);
+        fresh_model.randomize_weights(0.05, 0.4);
+        (fresh_model, 0)
+    };
 
     let stdp = STDP::new(
         0.01,  // a_plus
@@ -86,9 +115,16 @@ fn main() {
 
     let num_epochs = 15;
 
-    for epoch in 0..num_epochs {
+    for epoch in start_epoch..(start_epoch + num_epochs) {
+        print!("Epoch {}", epoch);
+        io::stdout().flush().unwrap();
         metrics.reset_epoch();
         for i in 0..train_set.len() {
+            if i % 100 == 0 {
+                print!(".");
+                io::stdout().flush().unwrap();
+            }
+
             let data = &train_set.images[i];
             model.reset();
             // Important: Reset encoders for each new image to ensure deterministic but fair start
@@ -130,9 +166,23 @@ fn main() {
             // Final normalization for the pattern
             model.normalise_weights(0.4 * num_inputs as f64);
         }
+        println!("");
         train_set.shuffle();
 
         metrics.report(epoch + 1, dt);
+
+        // Save progress after each epoch
+        let mut metadata = HashMap::new();
+        metadata.insert("epoch".to_string(), (epoch + 1).to_string());
+        metadata.insert("num_neurons".to_string(), num_neurons.to_string());
+        metadata.insert("resolution".to_string(), resolution.to_string());
+
+        let cp = ModelCheckpoint::new(model.clone(), metadata);
+        if let Err(e) = cp.save(checkpoint_path) {
+            println!("Warning: Failed to save checkpoint: {}", e);
+        } else {
+            println!("  Checkpoint saved to {}", checkpoint_path);
+        }
     }
 
     // 4. Calibration: Map neurons to labels
