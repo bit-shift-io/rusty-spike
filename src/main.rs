@@ -19,8 +19,8 @@ fn main() {
 
     // 1. Load MNIST Data (Balanced subset and downsampled for speed)
     println!("Loading MNIST data...");
-    let subset_size = 100;
-    let resolution = 14;
+    let subset_size = 10;
+    let resolution = 10;
     let mut train_set = MnistLoader::load_balanced_subset(
         "data/mnist/train-images-idx3-ubyte",
         "data/mnist/train-labels-idx1-ubyte",
@@ -32,7 +32,7 @@ fn main() {
     let mut test_set = MnistLoader::load_balanced_subset(
         "data/mnist/t10k-images-idx3-ubyte",
         "data/mnist/t10k-labels-idx1-ubyte",
-        10,
+        5,
     )
     .expect("Failed to load test data");
     test_set.downsample(resolution);
@@ -61,6 +61,7 @@ fn main() {
 
     // Initialize weights randomly
     model.randomize_weights(0.1, 0.5);
+    model.print_weights();
 
     let stdp = STDP::new(
         0.1,  // a_plus
@@ -82,7 +83,7 @@ fn main() {
     println!("Training...");
     let mut metrics = TrainingMetrics::new(num_neurons);
 
-    let num_epochs = 1;
+    let num_epochs = 3;
 
     for epoch in 0..num_epochs {
         metrics.reset_epoch();
@@ -119,6 +120,7 @@ fn main() {
         }
         if (epoch + 1) % 1 == 0 {
             metrics.report(epoch + 1, dt);
+            model.print_weights();
         }
     }
 
