@@ -77,8 +77,6 @@ impl Model {
 
         for (i, neuron) in self.neurons.iter_mut().enumerate() {
             // Calculate total input current for this neuron
-            // sum(weight_j * pulse_j)
-            // For simplicity, a spike at an input channel is treated as a unit pulse current.
             let mut i_ext = 0.0;
             for (j, &spiked) in input_spikes.iter().enumerate() {
                 if spiked && j < self.weights[i].len() {
@@ -86,9 +84,9 @@ impl Model {
                 }
             }
 
-            // Update neuron state
-            let fired = neuron.step(i_ext, dt, current_time);
-            output_spikes.push(fired);
+            // Update neuron state. returns true if v >= threshold
+            let would_fire = neuron.step(i_ext, dt, current_time);
+            output_spikes.push(would_fire);
         }
 
         output_spikes
@@ -98,26 +96,34 @@ impl Model {
     /// Returns the filtered spikes (only the winner's spike is kept).
     pub fn apply_lateral_inhibition(
         &mut self,
-        output_spikes: &[bool],
-        potentials_before: &[f64],
+        would_fire: &[bool],
+        _potentials_before: &[f64],
+        current_time: f64,
     ) -> Vec<bool> {
         let num_neurons = self.neurons.len();
         let mut filtered_spikes = vec![false; num_neurons];
 
-        if let Some(winner) = output_spikes
+        // Find winner among those who would fire
+        if let Some(winner) = would_fire
             .iter()
             .enumerate()
-            .filter(|&(_, &spiked)| spiked)
+            .filter(|&(_, &fired)| fired)
             .max_by(|(i, _), (j, _)| {
-                potentials_before[*i]
-                    .partial_cmp(&potentials_before[*j])
+                // Use current potentials (which are >= threshold) to pick winner
+                self.neurons[*i]
+                    .v
+                    .partial_cmp(&self.neurons[*j].v)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|(i, _)| i)
         {
             filtered_spikes[winner] = true;
 
-            // Inhibition: Reset membrane potential of others
+            // Fire winner: reset potential and increase theta
+            self.neurons[winner].fire(current_time);
+
+            // Inhibition: Reset membrane potential of others who would have fired (or all others?)
+            // Conventional SNN: reset all others to rest/reset to enforce competitive sparsity.
             for (i, neuron) in self.neurons.iter_mut().enumerate() {
                 if i != winner {
                     neuron.v = neuron.v_reset;
@@ -131,6 +137,12 @@ impl Model {
     pub fn reset(&mut self) {
         for neuron in &mut self.neurons {
             neuron.reset();
+        }
+    }
+
+    pub fn reset_all(&mut self) {
+        for neuron in &mut self.neurons {
+            neuron.reset_all();
         }
     }
 

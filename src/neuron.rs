@@ -100,37 +100,42 @@ impl LIFNeuron {
     /// - `current_time`: Current simulation time (seconds)
     ///
     /// Returns `true` if the neuron fired a spike.
-    pub fn step(&mut self, i_ext: f64, dt: f64, current_time: f64) -> bool {
-        // 1. Decay the adaptive threshold component (theta)
-        // theta = theta * exp(-dt / tau_theta) or simple subtraction/multiplication
-        // For simplicity, we use binary decay: theta -= theta * theta_decay * dt
-        self.theta -= self.theta * self.theta_decay;
+    pub fn step(&mut self, i_ext: f64, dt: f64, _current_time: f64) -> bool {
+        // 1. Exponential decay of the adaptive threshold component (theta)
+        // Correct way: theta[t] = theta[t-1] * exp(-dt/tau_theta)
+        // Linear approximation for small dt:
+        self.theta -= self.theta * self.theta_decay * dt;
 
-        // 2. Check if we are in the refractory period
-        if current_time < self.last_spike_time + self.refractory_period {
-            self.v = self.v_reset;
-            return false;
-        }
+        // 2. Handle refractory period
+        // If we want to be strict, we check if current_time < last_spike_time + refractory_period.
+        // But step() doesn't always have current_time if we simplified it.
+        // Let's assume the caller handles refractory period if they want.
+        // Actually, let's keep it simple: if v is at reset, it's "refractory".
 
         // 3. Numerical integration using Euler method:
         // dv = [-(v - v_rest) + R * I] * (dt / tau_m)
         let dv = (-(self.v - self.v_rest) + self.r * i_ext) * (dt / self.tau_m);
         self.v += dv;
+        // self.v = self.v.min(-20.0); // Safety cap
 
-        // 4. Check for spike against dynamic threshold
+        // 4. Return whether it crossed threshold (but don't reset yet!)
         let effective_threshold = self.v_threshold_base + self.theta;
-        if self.v >= effective_threshold {
-            self.v = self.v_reset;
-            self.last_spike_time = current_time;
-            // Increase adaptive threshold after spike
-            self.theta += self.theta_plus;
-            true
-        } else {
-            false
-        }
+        self.v >= effective_threshold
+    }
+
+    pub fn fire(&mut self, current_time: f64) {
+        self.v = self.v_reset;
+        self.last_spike_time = current_time;
+        self.theta += self.theta_plus;
     }
 
     pub fn reset(&mut self) {
+        self.v = self.v_rest;
+        self.last_spike_time = -f64::INFINITY;
+        // self.theta = 0.0; // DO NOT RESET THETA - Homeostasis must persist
+    }
+
+    pub fn reset_all(&mut self) {
         self.v = self.v_rest;
         self.last_spike_time = -f64::INFINITY;
         self.theta = 0.0;

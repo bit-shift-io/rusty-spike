@@ -11,7 +11,7 @@ impl Labeler {
 
     /// Calibrates the Labeler based on neuron selectivity.
     /// `selectivity[neuron_idx][label_idx]` is the spike count for that neuron for that label.
-    pub fn calibrate(&mut self, selectivity: &[Vec<u32>]) {
+    pub fn calibrate(&mut self, selectivity: &[Vec<usize>]) {
         let num_neurons = selectivity.len();
         if num_neurons == 0 {
             return;
@@ -56,14 +56,27 @@ impl Labeler {
         */
     }
 
-    pub fn predict(&self, spike_counts: &[u32]) -> usize {
-        let winner_neuron = spike_counts
+    pub fn predict(&self, spike_counts: &[usize]) -> usize {
+        let mut label_votes = vec![0.0; 10];
+        let mut total_spikes = 0;
+
+        for (neuron_idx, &count) in spike_counts.iter().enumerate() {
+            if count > 0 {
+                let label = self.neuron_to_label[neuron_idx];
+                label_votes[label] += count as f64;
+                total_spikes += count;
+            }
+        }
+
+        if total_spikes == 0 {
+            return 0; // Or some "unknown" indication
+        }
+
+        label_votes
             .iter()
             .enumerate()
-            .max_by_key(|&(_, count)| count)
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(i, _)| i)
-            .unwrap_or(0);
-
-        self.neuron_to_label[winner_neuron]
+            .unwrap_or(0)
     }
 }

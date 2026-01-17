@@ -6,27 +6,42 @@ pub trait Encoder {
     fn step(&mut self, input: f64, dt: f64, current_time: f64) -> bool;
 }
 
-/// Rate Coding: Converts input intensity into a spike probability.
-/// Higher input means higher probability of firing in each time step.
+/// Rate Coding: Converts input intensity into a spike train.
+/// Uses a deterministic accumulator-based approach for more stability.
 pub struct RateEncoder {
     /// Gain factor for the input (maps input to firing rate in Hz)
     pub gain: f64,
+    /// Accumulator for deterministic firing
+    pub accumulator: f64,
 }
 
 impl RateEncoder {
     pub fn new(gain: f64) -> Self {
-        Self { gain }
+        Self {
+            gain,
+            accumulator: 0.0,
+        }
+    }
+
+    /// Resets the internal accumulator state.
+    pub fn reset(&mut self) {
+        self.accumulator = 0.0;
     }
 }
 
 impl Encoder for RateEncoder {
     fn step(&mut self, input: f64, dt: f64, _current_time: f64) -> bool {
-        // Probability of spike in time dt = rate * dt
-        let rate = self.gain * input;
-        let p = rate * dt;
+        // Increment accumulator based on rate and dt
+        // rate = gain * input
+        // amount_to_add = rate * dt
+        self.accumulator += self.gain * input * dt;
 
-        // Simple random sampling
-        rand::random::<f64>() < p
+        if self.accumulator >= 1.0 {
+            self.accumulator -= 1.0;
+            true
+        } else {
+            false
+        }
     }
 }
 
