@@ -19,7 +19,7 @@ fn main() {
 
     // 1. Load MNIST Data (Balanced subset and downsampled for speed)
     println!("Loading MNIST data...");
-    let subset_size = 10;
+    let subset_size = 100;
     let resolution = 10;
     let mut train_set = MnistLoader::load_balanced_subset(
         "data/mnist/train-images-idx3-ubyte",
@@ -32,7 +32,7 @@ fn main() {
     let mut test_set = MnistLoader::load_balanced_subset(
         "data/mnist/t10k-images-idx3-ubyte",
         "data/mnist/t10k-labels-idx1-ubyte",
-        5,
+        20,
     )
     .expect("Failed to load test data");
     test_set.downsample(resolution);
@@ -45,7 +45,7 @@ fn main() {
 
     // 2. Setup Model and Training Params
     let num_inputs = resolution * resolution; // Downsampled 14x14
-    let num_neurons = 10; // One for each digit (ideally more, but start small)
+    let num_neurons = 20; // At least 1 neuron for each digit (ideally more, but start small)
 
     let neuron_template = LIFNeuron::new(
         -70.0, // v_rest
@@ -60,7 +60,7 @@ fn main() {
     let mut model = Model::new(num_neurons, num_inputs, neuron_template);
 
     // Initialize weights randomly
-    model.randomize_weights(0.1, 0.5);
+    model.randomize_weights(0.1, 0.8);
     model.print_weights();
 
     let stdp = STDP::new(
@@ -83,7 +83,7 @@ fn main() {
     println!("Training...");
     let mut metrics = TrainingMetrics::new(num_neurons);
 
-    let num_epochs = 3;
+    let num_epochs = 10;
 
     for epoch in 0..num_epochs {
         metrics.reset_epoch();
@@ -113,7 +113,7 @@ fn main() {
                     &mut metrics,
                 );
                 // Enforce weight normalization to maintain competition
-                model.normalise_weights(1.5);
+                model.normalise_weights(2.0 * num_neurons as f64);
                 metrics.record(&filtered_spikes);
                 current_time += dt;
             }
@@ -172,6 +172,7 @@ fn main() {
     println!("Evaluating...");
     let mut correct = 0;
     let evaluation_samples = test_set.len();
+    assert!(evaluation_samples > 0);
 
     for i in 0..evaluation_samples {
         let label = test_set.labels[i] as usize;
