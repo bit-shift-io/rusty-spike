@@ -51,9 +51,9 @@ mod tests {
 
     #[test]
     fn test_save_load_checkpoint() {
-        let mut model = Model::new(2, 2, LIFNeuron::default());
-        model.set_weight(0, 0, 0.5);
-        model.set_weight(1, 1, 0.8);
+        let mut model = Model::new(vec![(2, 2)], LIFNeuron::default());
+        model.layers[0].weights[0][0] = 0.5;
+        model.layers[0].weights[1][1] = 0.8;
 
         let mut metadata = HashMap::new();
         metadata.insert("epoch".to_string(), "10".to_string());
@@ -71,9 +71,9 @@ mod tests {
         let loaded = ModelCheckpoint::load(path).expect("Failed to load checkpoint");
 
         // Verify model
-        assert_eq!(loaded.model.neurons.len(), 2);
-        assert_eq!(loaded.model.weights[0][0], 0.5);
-        assert_eq!(loaded.model.weights[1][1], 0.8);
+        assert_eq!(loaded.model.layers[0].neurons.len(), 2);
+        assert_eq!(loaded.model.layers[0].weights[0][0], 0.5);
+        assert_eq!(loaded.model.layers[0].weights[1][1], 0.8);
 
         // Verify metadata
         assert_eq!(loaded.metadata.get("epoch").unwrap(), "10");

@@ -87,6 +87,20 @@ impl Dataset {
 
         self.images = new_images;
     }
+
+    pub fn reduce_bit_depth(&mut self, bits: u32) {
+        if bits == 0 || bits >= 8 {
+            return;
+        }
+
+        let levels = 2u32.pow(bits) as f64 - 1.0;
+        for img in &mut self.images {
+            for val in img.iter_mut() {
+                // Quantize to the nearest level in [0.0, 1.0]
+                *val = (*val * levels).round() / levels;
+            }
+        }
+    }
 }
 
 pub struct MnistLoader;

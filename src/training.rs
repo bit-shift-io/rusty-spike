@@ -1,4 +1,4 @@
-use crate::model::Model;
+use crate::model::Layer;
 use crate::training_metrics::TrainingMetrics;
 use rayon::prelude::*;
 
@@ -51,18 +51,19 @@ impl STDP {
     ///
     pub fn update(
         &self,
-        model: &mut Model,
+        layer: &mut Layer,
+        layer_idx: usize,
         output_spikes: &[bool],
         input_spikes: &[bool],
         current_time: f64,
         metrics: &mut TrainingMetrics,
     ) {
-        let last_input_spike_times = &model.last_input_spike_times;
+        let last_input_spike_times = &layer.last_input_spike_times;
 
-        let results: Vec<(usize, usize, f64, f64)> = model
+        let results: Vec<(usize, usize, f64, f64)> = layer
             .neurons
             .par_iter_mut()
-            .zip(model.weights.par_iter_mut())
+            .zip(layer.weights.par_iter_mut())
             .enumerate()
             .map(|(i, (neuron, neuron_weights))| {
                 let mut local_increased = 0;
@@ -101,7 +102,7 @@ impl STDP {
                         let decay = (-dt / self.tau_minus).exp();
                         for (j, &pre_spiked) in input_spikes.iter().enumerate() {
                             if pre_spiked {
-                                // Soft-bound depression: dw = a_minus * exp(-dt/tau) * (w - w_min)
+                                // Soft-bound depression: dw = a_minus * decay * (neuron_weights[j] - self.w_min)
                                 let dw = self.a_minus * decay * (neuron_weights[j] - self.w_min);
                                 let old_weight = neuron_weights[j];
                                 let new_weight = (old_weight - dw).max(self.w_min);
@@ -126,11 +127,13 @@ impl STDP {
             })
             .collect();
 
-        for (inc, dec, inc_val, dec_val) in results {
-            metrics.weights_increased += inc;
-            metrics.weights_decreased += dec;
-            metrics.total_increase += inc_val;
-            metrics.total_decrease += dec_val;
+        if let Some(m) = metrics.layers.get_mut(layer_idx) {
+            for (inc, dec, inc_val, dec_val) in results {
+                m.weights_increased += inc;
+                m.weights_decreased += dec;
+                m.total_increase += inc_val;
+                m.total_decrease += dec_val;
+            }
         }
     }
 }
@@ -138,56 +141,59 @@ impl STDP {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{model::Model, neuron::LIFNeuron};
+    use crate::{model::Layer, neuron::LIFNeuron};
 
     #[test]
     fn test_stdp_potentiation() {
-        let mut model = Model::new(1, 1, LIFNeuron::default());
+        let mut layer = Layer::new(1, 1, LIFNeuron::default());
         let stdp = STDP::new(0.1, 0.1, 0.02, 0.02, 1.0, 0.0);
-        let mut metrics = TrainingMetrics::new(1);
+        let mut metrics = TrainingMetrics::new(&[1usize]);
 
         // Simulate a pre-synaptic spike at t=0.01
-        model.last_input_spike_times[0] = Some(0.01);
+        layer.last_input_spike_times[0] = Some(0.01);
 
         // Post-synaptic spike at t=0.02
-        stdp.update(&mut model, &[true], &[false], 0.02, &mut metrics);
+        stdp.update(&mut layer, 0, &[true], &[false], 0.02, &mut metrics);
 
         // Weight should have increased
-        assert!(model.weights[0][0] > 0.0);
+        assert!(layer.weights[0][0] > 0.0);
     }
 
     #[test]
     fn test_stdp_depression() {
-        let mut model = Model::new(1, 1, LIFNeuron::default());
+        let mut layer = Layer::new(1, 1, LIFNeuron::default());
         let stdp = STDP::new(0.1, 0.1, 0.02, 0.02, 1.0, 0.0);
-        let mut metrics = TrainingMetrics::new(1);
-        model.weights[0][0] = 0.5;
+        let mut metrics = TrainingMetrics::new(&[1usize]);
+        layer.weights[0][0] = 0.5;
 
         // Post-synaptic spike at t=0.01
-        model.neurons[0].last_spike_time = Some(0.01);
+        layer.neurons[0].last_spike_time = Some(0.01);
 
         // Pre-synaptic spike at t=0.02
-        stdp.update(&mut model, &[false], &[true], 0.02, &mut metrics);
+        stdp.update(&mut layer, 0, &[false], &[true], 0.02, &mut metrics);
 
         // Weight should have decreased
-        assert!(model.weights[0][0] < 0.5);
+        assert!(layer.weights[0][0] < 0.5);
     }
 
     #[test]
     fn test_training_metrics() {
-        let mut metrics = TrainingMetrics::new(2);
-        metrics.record(&[true, false]);
-        metrics.record(&[false, false]);
-        metrics.record(&[true, true]);
+        let mut metrics = TrainingMetrics::new(&[2usize]);
+        metrics.record(0, &[true, false]);
+        metrics.record(0, &[false, false]);
+        metrics.record(0, &[true, true]);
+        metrics.add_step();
+        metrics.add_step();
+        metrics.add_step();
 
-        assert_eq!(metrics.firing_counts[0], 2);
-        assert_eq!(metrics.firing_counts[1], 1);
-        assert_eq!(metrics.ever_fired.len(), 2);
+        assert_eq!(metrics.layers[0].firing_counts[0], 2);
+        assert_eq!(metrics.layers[0].firing_counts[1], 1);
+        assert_eq!(metrics.layers[0].ever_fired.len(), 2);
         assert_eq!(metrics.total_steps, 3);
 
         metrics.reset_epoch();
-        assert_eq!(metrics.firing_counts[0], 0);
+        assert_eq!(metrics.layers[0].firing_counts[0], 0);
         assert_eq!(metrics.total_steps, 0);
-        assert_eq!(metrics.ever_fired.len(), 2); // Coverage persists
+        assert_eq!(metrics.layers[0].ever_fired.len(), 2); // Coverage persists
     }
 }

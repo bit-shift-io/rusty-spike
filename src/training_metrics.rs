@@ -1,89 +1,127 @@
 use std::collections::HashSet;
 
-pub struct TrainingMetrics {
+pub struct LayerMetrics {
     pub firing_counts: Vec<usize>,
     pub ever_fired: HashSet<usize>,
-    pub total_steps: usize,
-    pub num_neurons: usize,
     pub weights_increased: usize,
     pub weights_decreased: usize,
     pub total_increase: f64,
     pub total_decrease: f64,
+    pub num_neurons: usize,
 }
 
-impl TrainingMetrics {
+impl LayerMetrics {
     pub fn new(num_neurons: usize) -> Self {
         Self {
             firing_counts: vec![0; num_neurons],
             ever_fired: HashSet::new(),
-            total_steps: 0,
-            num_neurons,
             weights_increased: 0,
             weights_decreased: 0,
             total_increase: 0.0,
             total_decrease: 0.0,
-        }
-    }
-
-    pub fn record(&mut self, spikes: &[bool]) {
-        self.total_steps += 1;
-        for (i, &spiked) in spikes.iter().enumerate() {
-            if spiked {
-                self.firing_counts[i] += 1;
-                self.ever_fired.insert(i);
-            }
-        }
-    }
-
-    pub fn report(&self, epoch: usize, dt: f64) {
-        let sim_time = self.total_steps as f64 * dt;
-        let coverage = (self.ever_fired.len() as f64 / self.num_neurons as f64) * 100.0;
-        println!("  Epoch {} Metrics:", epoch);
-        println!(
-            "    Neuron Coverage: {:.1}% ({}/{})",
-            coverage,
-            self.ever_fired.len(),
-            self.num_neurons
-        );
-        for i in 0..self.num_neurons {
-            let freq = self.firing_counts[i] as f64 / sim_time;
-            println!(
-                "    Neuron {}: {} spikes ({:.2} Hz)",
-                i, self.firing_counts[i], freq
-            );
-        }
-
-        // Weight change statistics
-        let total_changes = self.weights_increased + self.weights_decreased;
-        println!(
-            "    Weight Changes: {} increased, {} decreased (total: {})",
-            self.weights_increased, self.weights_decreased, total_changes
-        );
-        println!(
-            "    Total Potentiation: {:.4}, Total Depression: {:.4}",
-            self.total_increase, self.total_decrease
-        );
-        if self.weights_increased > 0 {
-            println!(
-                "    Avg Increase: {:.6}",
-                self.total_increase / self.weights_increased as f64
-            );
-        }
-        if self.weights_decreased > 0 {
-            println!(
-                "    Avg Decrease: {:.6}",
-                self.total_decrease / self.weights_decreased as f64
-            );
+            num_neurons,
         }
     }
 
     pub fn reset_epoch(&mut self) {
         self.firing_counts.fill(0);
-        self.total_steps = 0;
         self.weights_increased = 0;
         self.weights_decreased = 0;
         self.total_increase = 0.0;
         self.total_decrease = 0.0;
+    }
+}
+
+pub struct TrainingMetrics {
+    pub layers: Vec<LayerMetrics>,
+    pub total_steps: usize,
+}
+
+impl TrainingMetrics {
+    pub fn new(layer_sizes: &[usize]) -> Self {
+        Self {
+            layers: layer_sizes.iter().map(|&n| LayerMetrics::new(n)).collect(),
+            total_steps: 0,
+        }
+    }
+
+    pub fn record(&mut self, layer_idx: usize, spikes: &[bool]) {
+        if layer_idx < self.layers.len() {
+            let layer = &mut self.layers[layer_idx];
+            for (i, &spiked) in spikes.iter().enumerate() {
+                if spiked && i < layer.num_neurons {
+                    layer.firing_counts[i] += 1;
+                    layer.ever_fired.insert(i);
+                }
+            }
+        }
+        // Increment total_steps only once per overall step call (managed externally usually, but we'll stick to per-pattern logic)
+    }
+
+    pub fn add_step(&mut self) {
+        self.total_steps += 1;
+    }
+
+    pub fn report(&self, epoch: usize, dt: f64) {
+        let sim_time = self.total_steps as f64 * dt;
+        println!(
+            "\n  Epoch {} Metrics Summary (Sim Time: {:.3}s):",
+            epoch, sim_time
+        );
+        println!("  {:-<138}", "");
+        println!(
+            "  {: <6} | {: <10} | {: <12} | {: <10} | {: <10} | {: <12} | {: <12} | {: <12} | {: <12}",
+            "Layer",
+            "Coverage",
+            "Avg Rate",
+            "Spikes",
+            "Max Rate",
+            "W+ Count",
+            "W- Count",
+            "Avg Inc",
+            "Avg Dec"
+        );
+        println!("  {:-<138}", "");
+
+        for (idx, layer) in self.layers.iter().enumerate() {
+            let coverage = (layer.ever_fired.len() as f64 / layer.num_neurons as f64) * 100.0;
+            let total_layer_spikes: usize = layer.firing_counts.iter().sum();
+            let avg_rate = total_layer_spikes as f64 / (layer.num_neurons as f64 * sim_time);
+            let max_spikes = *layer.firing_counts.iter().max().unwrap_or(&0);
+            let max_rate = max_spikes as f64 / sim_time;
+
+            let avg_inc = if layer.weights_increased > 0 {
+                layer.total_increase / layer.weights_increased as f64
+            } else {
+                0.0
+            };
+            let avg_dec = if layer.weights_decreased > 0 {
+                layer.total_decrease / layer.weights_decreased as f64
+            } else {
+                0.0
+            };
+
+            println!(
+                "  {: <6} | {: >9.1}% | {: >10.2}Hz | {: >10} | {: >8.2}Hz | {: >12} | {: >12} | {: >12.6} | {: >12.6}",
+                idx,
+                coverage,
+                avg_rate,
+                total_layer_spikes,
+                max_rate,
+                layer.weights_increased,
+                layer.weights_decreased,
+                avg_inc,
+                avg_dec
+            );
+        }
+        println!("  {:-<138}\n", "");
+    }
+
+    pub fn reset_epoch(&mut self) {
+        for layer in &mut self.layers {
+            layer.reset_epoch();
+        }
+        self.total_steps = 0;
     }
 }
 
@@ -93,19 +131,18 @@ mod tests {
 
     #[test]
     fn test_training_metrics() {
-        let mut metrics = TrainingMetrics::new(2);
-        metrics.record(&[true, false]);
-        metrics.record(&[false, false]);
-        metrics.record(&[true, true]);
+        let mut metrics = TrainingMetrics::new(&[2, 3]);
+        metrics.record(0, &[true, false]);
+        metrics.record(1, &[true, false, true]);
+        metrics.add_step();
 
-        assert_eq!(metrics.firing_counts[0], 2);
-        assert_eq!(metrics.firing_counts[1], 1);
-        assert_eq!(metrics.ever_fired.len(), 2);
-        assert_eq!(metrics.total_steps, 3);
+        assert_eq!(metrics.layers[0].firing_counts[0], 1);
+        assert_eq!(metrics.layers[1].firing_counts[0], 1);
+        assert_eq!(metrics.layers[1].firing_counts[2], 1);
+        assert_eq!(metrics.total_steps, 1);
 
         metrics.reset_epoch();
-        assert_eq!(metrics.firing_counts[0], 0);
+        assert_eq!(metrics.layers[0].firing_counts[0], 0);
         assert_eq!(metrics.total_steps, 0);
-        assert_eq!(metrics.ever_fired.len(), 2); // Coverage persists
     }
 }

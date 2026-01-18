@@ -2,11 +2,11 @@ use crate::neuron::LIFNeuron;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// A Model represents a layer (or simple network) of spiking neurons.
-/// It manages the neurons and their synaptic connections from external inputs.
+/// A Layer represents a layer of spiking neurons.
+/// It manages the neurons and their synaptic connections.
 #[derive(Serialize, Deserialize, Clone)]
-pub struct Model {
-    /// The neurons in this model
+pub struct Layer {
+    /// The neurons in this layer
     pub neurons: Vec<LIFNeuron>,
     /// Weights from inputs to each neuron.
     /// weights[i][j] is the weight from input j to neuron i.
@@ -15,14 +15,10 @@ pub struct Model {
     pub last_input_spike_times: Vec<Option<f64>>,
 }
 
-impl Model {
-    /// Creates a new model with a specified number of neurons and input size.
-    ///
-    /// All neurons are initialized with the same default LIF parameters.
+impl Layer {
+    /// Creates a new layer with a specified number of neurons and input size.
     pub fn new(num_neurons: usize, num_inputs: usize, neuron_template: LIFNeuron) -> Self {
         let neurons = (0..num_neurons).map(|_| neuron_template.clone()).collect();
-
-        // Initialize weights to 0.0
         let weights = vec![vec![0.0; num_inputs]; num_neurons];
         let last_input_spike_times = vec![None; num_inputs];
 
@@ -30,14 +26,6 @@ impl Model {
             neurons,
             weights,
             last_input_spike_times,
-        }
-    }
-
-    /// Sets the weight of a specific synapse.
-    #[allow(dead_code)]
-    pub fn set_weight(&mut self, neuron_idx: usize, input_idx: usize, weight: f64) {
-        if neuron_idx < self.weights.len() && input_idx < self.weights[0].len() {
-            self.weights[neuron_idx][input_idx] = weight;
         }
     }
 
@@ -61,15 +49,9 @@ impl Model {
         });
     }
 
-    /// Performs a single simulation step.
-    ///
-    /// - `input_spikes`: A slice representing which input channels spiked.
-    /// - `dt`: Time step (seconds).
-    /// - `current_time`: Current simulation time (seconds).
-    ///
-    /// Returns a vector of booleans indicating which neurons in the model spiked.
+    /// Performs a single simulation step for this layer.
     pub fn step(&mut self, input_spikes: &[bool], dt: f64, current_time: f64) -> Vec<bool> {
-        // Update input spike times
+        // Update input spike times for STDP
         for (j, &spiked) in input_spikes.iter().enumerate() {
             if spiked && j < self.last_input_spike_times.len() {
                 self.last_input_spike_times[j] = Some(current_time);
@@ -80,38 +62,30 @@ impl Model {
             .par_iter_mut()
             .zip(self.weights.par_iter())
             .map(|(neuron, neuron_weights)| {
-                // Calculate total input current for this neuron
                 let mut i_ext = 0.0;
                 for (j, &spiked) in input_spikes.iter().enumerate() {
                     if spiked && j < neuron_weights.len() {
                         i_ext += neuron_weights[j];
                     }
                 }
-
-                // Update neuron state. returns true if v >= threshold
                 neuron.step(i_ext, dt, current_time)
             })
             .collect()
     }
 
-    /// Applies lateral inhibition (Winner-Takes-All) based on membrane potentials.
-    /// Returns the filtered spikes (only the winner's spike is kept).
     pub fn apply_lateral_inhibition(
         &mut self,
         would_fire: &[bool],
-        _potentials_before: &[f64],
         current_time: f64,
     ) -> Vec<bool> {
         let num_neurons = self.neurons.len();
         let mut filtered_spikes = vec![false; num_neurons];
 
-        // Find winner among those who would fire
         if let Some(winner) = would_fire
             .iter()
             .enumerate()
             .filter(|&(_, &fired)| fired)
             .max_by(|(i, _), (j, _)| {
-                // Use current potentials (which are >= threshold) to pick winner
                 self.neurons[*i]
                     .v
                     .partial_cmp(&self.neurons[*j].v)
@@ -120,12 +94,7 @@ impl Model {
             .map(|(i, _)| i)
         {
             filtered_spikes[winner] = true;
-
-            // Fire winner: reset potential and increase theta
             self.neurons[winner].fire(current_time);
-
-            // Inhibition: Reset membrane potential of others who would have fired (or all others?)
-            // Conventional SNN: reset all others to rest/reset to enforce competitive sparsity.
             for (i, neuron) in self.neurons.iter_mut().enumerate() {
                 if i != winner {
                     neuron.v = neuron.v_reset;
@@ -147,26 +116,77 @@ impl Model {
             neuron.reset_all();
         }
     }
+}
 
-    // pub fn neuron_idx_with_highest_membrane_potential(&self) -> usize {
-    //     self.neurons
-    //         .iter()
-    //         .enumerate()
-    //         .max_by(|(_, a), (_, b)| a.v.partial_cmp(&b.v).unwrap())
-    //         .map(|(idx, _)| idx)
-    //         .unwrap()
-    // }
+/// A Model represents the entire multi-layer network.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Model {
+    pub layers: Vec<Layer>,
+}
+
+impl Model {
+    pub fn new(layer_configs: Vec<(usize, usize)>, neuron_template: LIFNeuron) -> Self {
+        let layers = layer_configs
+            .into_iter()
+            .map(|(num_neurons, num_inputs)| {
+                Layer::new(num_neurons, num_inputs, neuron_template.clone())
+            })
+            .collect();
+
+        Self { layers }
+    }
+
+    pub fn step(&mut self, input_spikes: &[bool], dt: f64, current_time: f64) -> Vec<Vec<bool>> {
+        let mut all_spikes = Vec::with_capacity(self.layers.len());
+        let mut current_input = input_spikes.to_vec();
+
+        for layer in &mut self.layers {
+            let output_spikes = layer.step(&current_input, dt, current_time);
+            let filtered_spikes = layer.apply_lateral_inhibition(&output_spikes, current_time);
+            all_spikes.push(filtered_spikes.clone());
+            current_input = filtered_spikes;
+        }
+
+        all_spikes
+    }
+
+    pub fn randomize_weights(&mut self, min_weight: f64, max_weight: f64) {
+        for layer in &mut self.layers {
+            layer.randomize_weights(min_weight, max_weight);
+        }
+    }
+
+    pub fn normalise_weights(&mut self, target_sums: &[f64]) {
+        for (i, layer) in self.layers.iter_mut().enumerate() {
+            if i < target_sums.len() {
+                layer.normalise_weights(target_sums[i]);
+            }
+        }
+    }
+
+    pub fn reset(&mut self) {
+        for layer in &mut self.layers {
+            layer.reset();
+        }
+    }
+
+    pub fn reset_all(&mut self) {
+        for layer in &mut self.layers {
+            layer.reset_all();
+        }
+    }
 
     #[allow(dead_code)]
     pub fn print_weights(&self) {
-        // Print weights for inspection
-        println!("Weights:");
-        for i in 0..self.neurons.len() {
-            print!("  Neuron {}: ", i);
-            for j in 0..self.weights[i].len() {
-                print!("{:.2} ", self.weights[i][j]);
+        for (idx, layer) in self.layers.iter().enumerate() {
+            println!("Layer {}:", idx);
+            for i in 0..layer.neurons.len() {
+                print!("  Neuron {}: ", i);
+                for j in 0..layer.weights[i].len() {
+                    print!("{:.2} ", layer.weights[i][j]);
+                }
+                println!();
             }
-            println!();
         }
     }
 }
@@ -176,27 +196,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_model_initialization() {
-        let model = Model::new(5, 10, LIFNeuron::default());
-        assert_eq!(model.neurons.len(), 5);
-        assert_eq!(model.weights.len(), 5);
-        assert_eq!(model.weights[0].len(), 10);
+    fn test_layer_initialization() {
+        let layer = Layer::new(5, 10, LIFNeuron::default());
+        assert_eq!(layer.neurons.len(), 5);
+        assert_eq!(layer.weights.len(), 5);
+        assert_eq!(layer.weights[0].len(), 10);
     }
 
     #[test]
-    fn test_model_step_no_input() {
-        let mut model = Model::new(1, 1, LIFNeuron::default());
-        let spikes = model.step(&[false], 0.001, 0.001);
+    fn test_layer_step_no_input() {
+        let mut layer = Layer::new(1, 1, LIFNeuron::default());
+        let spikes = layer.step(&[false], 0.001, 0.001);
         assert!(!spikes[0]);
     }
 
     #[test]
-    fn test_model_spike_propagation() {
-        let mut model = Model::new(1, 1, LIFNeuron::default());
-        // Set a huge weight to ensure firing
-        model.set_weight(0, 0, 100.0);
-
-        let spikes = model.step(&[true], 0.1, 0.1);
-        assert!(spikes[0]);
+    fn test_model_multi_layer() {
+        let model = Model::new(vec![(10, 5), (5, 10)], LIFNeuron::default());
+        assert_eq!(model.layers.len(), 2);
+        assert_eq!(model.layers[0].neurons.len(), 10);
+        assert_eq!(model.layers[1].neurons.len(), 5);
     }
 }
